@@ -18,13 +18,12 @@ data class RecommendationSection(
 )
 
 data class Song(
-    val videoId: String,
-    val title: String,
-    val artist: String,
+    val videoId: String = "",
+    val title: String = "",
+    val artist: String = "",
     val thumbnail: String = "",
-    val duration: String? = null,
-    val album: String? = null,
-    val playlistId: String? = null
+    val streamUrl: String? = null,      // For downloading
+    val localPath: String? = null       // For offline play
 )
 
 data class AccountInfo(
