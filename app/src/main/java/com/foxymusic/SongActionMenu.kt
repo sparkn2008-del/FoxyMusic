@@ -25,9 +25,6 @@ fun SongActionMenu(
     val context = LocalContext.current
     val colors = foxyPalette()
 
-    val library by FoxyLibraryStore.state.collectAsState()
-    val isDownloaded = library.isDownloaded(song)
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = colors.surface,
@@ -43,8 +40,13 @@ fun SongActionMenu(
                 TrackArtwork(song = song, modifier = Modifier.size(64.dp))
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(song.title, fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 17.sp)
-                    Text(song.artist, color = colors.muted, fontSize = 14.sp)
+                    Text(
+                        text = song.title,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    Text(song.artist, fontSize = 14.sp, color = colors.muted)
                 }
             }
 
@@ -52,6 +54,7 @@ fun SongActionMenu(
 
             Spacer(Modifier.height(8.dp))
 
+            // Basic Actions
             ActionItem(Icons.Rounded.PlayArrow, "Play") {
                 MusicPlayer.play(context, song)
                 onDismiss()
@@ -67,15 +70,8 @@ fun SongActionMenu(
                 onDismiss()
             }
 
-            ActionItem(
-                if (isDownloaded) Icons.Rounded.Delete else Icons.Rounded.Download,
-                if (isDownloaded) "Remove Download" else "Download"
-            ) {
-                if (isDownloaded) {
-                    FoxyLibraryStore.removeDownload(song, context)
-                } else {
-                    FoxyLibraryStore.downloadSong(context, song)
-                }
+            ActionItem(Icons.Rounded.Download, "Download") {
+                FoxyLibraryStore.downloadSong(context, song)
                 onDismiss()
             }
 
