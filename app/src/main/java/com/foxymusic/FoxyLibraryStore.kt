@@ -3,14 +3,21 @@ package com.foxymusic
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class FoxyLibraryState(
     val likedSongs: List<Song> = emptyList(),
     val savedSongs: List<Song> = emptyList(),
     val downloadedSongs: List<Song> = emptyList(),
-    val history: List<Song> = emptyList()
+    val history: List<Song> = emptyList(),
+    val downloadProgress: Map<String, Float> = emptyMap()
 ) {
     fun isLiked(song: Song?): Boolean = song != null && likedSongs.any { it.videoId == song.videoId }
     fun isSaved(song: Song?): Boolean = song != null && savedSongs.any { it.videoId == song.videoId }
@@ -25,6 +32,7 @@ object FoxyLibraryStore {
     private const val HISTORY = "history"
 
     private var context: Context? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(FoxyLibraryState())
     val state: StateFlow<FoxyLibraryState> = _state
 
@@ -67,7 +75,18 @@ object FoxyLibraryStore {
     fun download(song: Song) {
         val current = _state.value
         if (current.isDownloaded(song)) return
-        update(current.copy(downloadedSongs = listOf(song) + current.downloadedSongs.filterNot { it.videoId == song.videoId }))
+        _state.update { it.copy(downloadProgress = it.downloadProgress + (song.videoId to 0f)) }
+        scope.launch {
+            for (step in 1..10) {
+                delay(180)
+                _state.update { it.copy(downloadProgress = it.downloadProgress + (song.videoId to (step / 10f))) }
+            }
+            val next = _state.value.copy(
+                downloadedSongs = listOf(song) + _state.value.downloadedSongs.filterNot { it.videoId == song.videoId },
+                downloadProgress = _state.value.downloadProgress - song.videoId
+            )
+            update(next)
+        }
     }
 
     fun removeDownload(song: Song) {

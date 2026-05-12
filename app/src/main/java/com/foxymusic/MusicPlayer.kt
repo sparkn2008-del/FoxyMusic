@@ -13,12 +13,15 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlin.random.Random
 
 data class PlayerUiState(
     val currentSong: Song? = null,
@@ -27,8 +30,12 @@ data class PlayerUiState(
     val durationMs: Long = 0L,
     val error: String? = null,
     val queue: List<Song> = emptyList(),
-    val queueIndex: Int = -1
+    val queueIndex: Int = -1,
+    val shuffleEnabled: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.Off
 )
+
+enum class RepeatMode { Off, All, One }
 
 object MusicPlayer {
 
@@ -36,6 +43,10 @@ object MusicPlayer {
     private var appContext: Context? = null
     private var queue: List<Song> = emptyList()
     private var queueIndex: Int = -1
+    private var shuffleEnabled = false
+    private var repeatMode = RepeatMode.Off
+    private var sleepJob: Job? = null
+    private var stopAfterCurrentSong = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state
@@ -73,7 +84,16 @@ object MusicPlayer {
         } else {
             queueIndex = queue.indexOfFirst { it.videoId == song.videoId }
         }
-        _state.value = PlayerUiState(currentSong = song, isBuffering = true, queue = queue, queueIndex = queueIndex)
+            _state.value = _state.value.copy(
+                currentSong = song,
+                isBuffering = true,
+                isPlaying = false,
+                error = null,
+                queue = queue,
+                queueIndex = queueIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode
+            )
         val result = withContext(Dispatchers.IO) {
             StreamExtractor.getStreamResult(song.videoId)
         }
@@ -91,7 +111,15 @@ object MusicPlayer {
             FoxyLibraryStore.addHistory(song)
         }
         FoxyDynamicTheme.updateFromSong(song)
-        _state.value = PlayerUiState(currentSong = song, isBuffering = true, queue = queue, queueIndex = queueIndex)
+        _state.value = _state.value.copy(
+            currentSong = song,
+            isBuffering = true,
+            error = null,
+            queue = queue,
+            queueIndex = queueIndex,
+            shuffleEnabled = shuffleEnabled,
+            repeatMode = repeatMode
+        )
         runCatching { PlaybackService.start(context.applicationContext) }
             .onFailure { Log.w("FoxyMusic", "Playback service could not start yet", it) }
 
@@ -119,7 +147,19 @@ object MusicPlayer {
                             Player.STATE_READY -> Log.d("FoxyMusic", "Ready to play!")
                             Player.STATE_ENDED -> {
                                 Log.d("FoxyMusic", "Playback ended")
-                                playNext()
+                                if (stopAfterCurrentSong) {
+                                    stopAfterCurrentSong = false
+                                    pause()
+                                    return
+                                }
+                                when (repeatMode) {
+                                    RepeatMode.One -> {
+                                        player?.seekTo(0)
+                                        player?.playWhenReady = true
+                                    }
+                                    RepeatMode.All -> playNext(loop = true)
+                                    RepeatMode.Off -> playNext()
+                                }
                             }
                             Player.STATE_IDLE -> Log.d("FoxyMusic", "Player idle")
                         }
@@ -185,6 +225,10 @@ object MusicPlayer {
         }
     }
 
+    fun pause() {
+        scope.launch { player?.pause() }
+    }
+
     fun isPlaying(): Boolean = player?.isPlaying ?: false
 
     fun currentPosition(): Long = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
@@ -195,11 +239,19 @@ object MusicPlayer {
         scope.launch { player?.seekTo(positionMs.coerceAtLeast(0L)) }
     }
 
-    fun playNext() {
+    fun playNext(loop: Boolean = false) {
         scope.launch {
             val context = appContext ?: return@launch
             if (queue.isEmpty()) return@launch
-            val nextIndex = (queueIndex + 1).takeIf { it <= queue.lastIndex } ?: return@launch
+            val nextIndex = when {
+                shuffleEnabled && queue.size > 1 -> {
+                    generateSequence { Random.nextInt(queue.size) }
+                        .first { it != queueIndex }
+                }
+                queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
+                loop -> 0
+                else -> return@launch
+            }
             queueIndex = nextIndex
             playPrepared(context, queue[queueIndex])
         }
@@ -223,6 +275,62 @@ object MusicPlayer {
         scope.launch {
             player?.playbackParameters = PlaybackParameters(speed.coerceIn(0.5f, 2f), pitch.coerceIn(0.5f, 2f))
         }
+    }
+
+    fun toggleShuffle() {
+        shuffleEnabled = !shuffleEnabled
+        _state.update { it.copy(shuffleEnabled = shuffleEnabled) }
+    }
+
+    fun cycleRepeatMode() {
+        repeatMode = when (repeatMode) {
+            RepeatMode.Off -> RepeatMode.All
+            RepeatMode.All -> RepeatMode.One
+            RepeatMode.One -> RepeatMode.Off
+        }
+        _state.update { it.copy(repeatMode = repeatMode) }
+    }
+
+    fun addToQueue(song: Song) {
+        queue = (queue + song).distinctBy { it.videoId }
+        _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+    }
+
+    fun removeFromQueue(song: Song) {
+        val removedIndex = queue.indexOfFirst { it.videoId == song.videoId }
+        queue = queue.filterNot { it.videoId == song.videoId }
+        if (removedIndex != -1 && queueIndex > removedIndex) queueIndex -= 1
+        queueIndex = queueIndex.coerceAtMost(queue.lastIndex)
+        _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+    }
+
+    fun startRadio(context: Context, seed: Song) {
+        scope.launch {
+            val radio = withContext(Dispatchers.IO) {
+                runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+            }
+            playQueue(context.applicationContext, (listOf(seed) + radio).distinctBy { it.videoId }, 0)
+        }
+    }
+
+    fun scheduleSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        stopAfterCurrentSong = false
+        sleepJob = scope.launch {
+            delay(minutes * 60_000L)
+            pause()
+        }
+    }
+
+    fun sleepAfterCurrentSong() {
+        sleepJob?.cancel()
+        stopAfterCurrentSong = true
+    }
+
+    fun cancelSleepTimer() {
+        sleepJob?.cancel()
+        sleepJob = null
+        stopAfterCurrentSong = false
     }
 
     fun release() {

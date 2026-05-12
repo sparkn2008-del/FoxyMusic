@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
-import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.History
@@ -68,7 +67,6 @@ data class AppDestination(
 
 private val bottomDestinations = listOf(
     AppDestination("home", "Home", Icons.Rounded.Home),
-    AppDestination("discover", "Discover", Icons.Rounded.Explore),
     AppDestination("search", "Search", Icons.Rounded.Search),
     AppDestination("library", "Library", Icons.Rounded.LibraryMusic),
     AppDestination("profile", "Me", Icons.Rounded.Person)
@@ -164,7 +162,6 @@ fun FoxyMusicApp() {
             modifier = Modifier.padding(paddingValues)
         ) {
             composable("home") { HomeScreen(onPlayAll = { navController.navigateSingleTop("search") }) }
-            composable("discover") { DiscoverScreen(navController) }
             composable("search") { SearchScreen() }
             composable("library") { LibraryScreen(navController) }
             composable("profile") { ProfileScreen(navController) }

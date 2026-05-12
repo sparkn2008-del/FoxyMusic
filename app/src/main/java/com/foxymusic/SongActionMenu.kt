@@ -86,22 +86,38 @@ fun SongActionMenu(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 ActionIcon(Icons.Rounded.Radio, "Radio", Modifier.weight(1f)) {
-                    openMusicSearch(context, "${song.title} radio")
+                    MusicPlayer.startRadio(context, song)
+                    onDismiss()
                 }
                 ActionIcon(Icons.Rounded.Add, "Playlist", Modifier.weight(1f)) {
                     FoxyLibraryStore.toggleSaved(song)
+                    MusicPlayer.addToQueue(song)
+                    onDismiss()
                 }
                 ActionIcon(Icons.Rounded.ContentCopy, "Copy URL", Modifier.weight(1f)) {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("YouTube Music URL", song.youtubeUrl()))
+                    onDismiss()
                 }
             }
 
-            ActionRow(Icons.Rounded.Album, "View album", "Open related album results") { openMusicSearch(context, "${song.title} ${song.artist} album") }
-            ActionRow(Icons.Rounded.Person, "View artist", song.artist) { openMusicSearch(context, song.artist) }
-            ActionRow(Icons.Rounded.Download, "Download song", "Save to Downloads in your library") { FoxyLibraryStore.download(song) }
+            ActionRow(Icons.Rounded.Album, "View album", "Open related album results") {
+                openMusicSearch(context, "${song.title} ${song.artist} album")
+                onDismiss()
+            }
+            ActionRow(Icons.Rounded.Person, "View artist", song.artist) {
+                openMusicSearch(context, song.artist)
+                onDismiss()
+            }
+            ActionRow(Icons.Rounded.Download, "Download song", "Save to Downloads in your library") {
+                FoxyLibraryStore.download(song)
+                onDismiss()
+            }
             if (library.isDownloaded(song)) {
-                ActionRow(Icons.Rounded.Delete, "Remove download", "Remove from Downloads") { FoxyLibraryStore.removeDownload(song) }
+                ActionRow(Icons.Rounded.Delete, "Remove download", "Remove from Downloads") {
+                    FoxyLibraryStore.removeDownload(song)
+                    onDismiss()
+                }
             }
             ActionRow(Icons.Rounded.Info, "Details", "Show song metadata") { showDetails = true }
             ActionRow(Icons.Rounded.Settings, "Adjust", "Speed and pitch controls") { showAdjust = true }

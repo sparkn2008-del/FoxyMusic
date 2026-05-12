@@ -1,5 +1,6 @@
 package com.foxymusic
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -7,213 +8,234 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.Cached
-import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.PlaylistPlay
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Sort
-import androidx.compose.material.icons.rounded.TrendingUp
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import kotlinx.coroutines.launch
 
-private val libraryTabs = listOf("Playlists", "Songs", "Albums", "Artists", "Downloads", "History")
+private val libraryTabs = listOf("Songs", "Playlists", "Albums", "Artists", "Podcasts", "Videos")
 
-private val libraryCards = listOf(
-    LibraryCard("Liked Songs", Icons.Rounded.Favorite, "Songs you save", "profile", Color(0xFFFF7A45)),
-    LibraryCard("Downloaded", Icons.Rounded.CheckCircle, "Offline music", "downloads", Color(0xFF55C7A4)),
-    LibraryCard("Recently Played", Icons.Rounded.History, "Listening trail", "history", Color(0xFF8EA7FF)),
-    LibraryCard("My Top Mix", Icons.Rounded.TrendingUp, "Smart collection", "stats", Color(0xFFE6B34A)),
-    LibraryCard("Cached", Icons.Rounded.Cached, "Fast replay", "storage", Color(0xFF73D1E5)),
-    LibraryCard("Artists", Icons.Rounded.Person, "People you follow", "search", Color(0xFFE97895))
-)
-
-private data class LibraryCard(
-    val title: String,
-    val icon: ImageVector,
-    val subtitle: String,
-    val route: String,
-    val tint: Color
-)
-
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(navController: NavController? = null) {
-    val settings by FoxySettings.state.collectAsState()
     val library by FoxyLibraryStore.state.collectAsState()
+    val playerState by MusicPlayer.state.collectAsState()
     val colors = foxyPalette()
-    Box(
-        modifier = Modifier
+    val context = LocalContext.current
+    val pagerState = rememberPagerState { libraryTabs.size }
+    val scope = rememberCoroutineScope()
+    var menuSong by remember { mutableStateOf<Song?>(null) }
+
+    fun play(song: Song, queue: List<Song>) {
+        MusicPlayer.playQueue(context, queue.ifEmpty { listOf(song) }, queue.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0))
+    }
+
+    Column(
+        Modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(Brush.verticalGradient(listOf(Color.Black, colors.background)))
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+            Text("Library", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
+            Text("Your liked, saved, downloaded, and recently played music.", color = colors.muted, fontSize = 13.sp)
+        }
+
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LibraryTile(Icons.Rounded.Favorite, "Liked", "${library.likedSongs.size}", Modifier.weight(1f)) {
+                library.likedSongs.firstOrNull()?.let { play(it, library.likedSongs) }
+            }
+            LibraryTile(Icons.Rounded.Download, "Downloads", "${library.downloadedSongs.size}", Modifier.weight(1f)) {
+                navController?.navigate("downloads")
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LibraryTile(Icons.Rounded.History, "History", "${library.history.size}", Modifier.weight(1f)) {
+                library.history.firstOrNull()?.let { play(it, library.history) }
+            }
+            LibraryTile(Icons.Rounded.Search, "Find more", "Search", Modifier.weight(1f)) {
+                navController?.navigate("search")
+            }
+        }
+
+        ScrollableTabRow(
+            selectedTabIndex = pagerState.currentPage,
+            containerColor = Color.Transparent,
+            contentColor = colors.accent,
+            edgePadding = 18.dp
         ) {
-            item {
-                LibraryHeader(library)
+            libraryTabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = pagerState.currentPage == index,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                    text = { Text(title, fontWeight = FontWeight.Bold) }
+                )
             }
+        }
 
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(libraryTabs) { tab ->
-                        MetroChip(label = tab, selected = tab == "Playlists")
-                    }
-                }
+        HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+            when (page) {
+                0 -> SongListTab(
+                    title = "Liked songs",
+                    songs = library.likedSongs.ifEmpty { library.savedSongs.ifEmpty { library.history } },
+                    playerState = playerState,
+                    onPlay = ::play,
+                    onMore = { menuSong = it }
+                )
+                1 -> CollectionTab(Icons.Rounded.LibraryMusic, "Saved music", library.savedSongs, ::play, { menuSong = it })
+                2 -> CollectionTab(Icons.Rounded.Album, "Albums from saved songs", library.savedSongs.distinctBy { it.album ?: it.artist }, ::play, { menuSong = it })
+                3 -> CollectionTab(Icons.Rounded.Person, "Artists", library.history.distinctBy { it.artist }, ::play, { menuSong = it })
+                4 -> EmptyLibraryTab(Icons.Rounded.Podcasts, "Podcasts will appear here after playback or saving.")
+                5 -> CollectionTab(Icons.Rounded.Movie, "Videos", library.history, ::play, { menuSong = it })
             }
+        }
+    }
 
-            item {
+    menuSong?.let { SongActionMenu(song = it, onDismiss = { menuSong = null }) }
+}
+
+@Composable
+private fun LibraryTile(icon: ImageVector, title: String, value: String, modifier: Modifier, onClick: () -> Unit) {
+    val colors = foxyPalette()
+    Row(
+        modifier = modifier
+            .height(86.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Brush.linearGradient(listOf(colors.surfaceHigh, colors.surface)))
+            .clickable { onClick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(42.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = colors.accent)
+        }
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(title, color = Color.White, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(value, color = colors.muted, fontSize = 12.sp, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun SongListTab(
+    title: String,
+    songs: List<Song>,
+    playerState: PlayerUiState,
+    onPlay: (Song, List<Song>) -> Unit,
+    onMore: (Song) -> Unit
+) {
+    val colors = foxyPalette()
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+        }
+        if (songs.isEmpty()) {
+            item { EmptyLibraryMessage("Save or like songs to fill this page.") }
+        } else {
+            items(songs, key = { it.videoId }) { song ->
+                val isCurrent = playerState.currentSong?.videoId == song.videoId
+                FoxySongRow(
+                    song = song,
+                    isCurrent = isCurrent,
+                    isPlaying = isCurrent && playerState.isPlaying,
+                    onClick = { onPlay(song, songs) },
+                    onMore = { onMore(song) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionTab(
+    icon: ImageVector,
+    title: String,
+    songs: List<Song>,
+    onPlay: (Song, List<Song>) -> Unit,
+    onMore: (Song) -> Unit
+) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp)) }
+        if (songs.isEmpty()) {
+            item { EmptyLibraryTab(icon, "Nothing here yet.") }
+        } else {
+            items(songs, key = { it.videoId }) { song ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(foxyPalette().surface.copy(alpha = 0.7f)).clickable { onPlay(song, songs) }.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.Sort, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
-                    Text("Recently updated", color = colors.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
-                    Icon(Icons.Rounded.ArrowDownward, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.weight(1f))
-                    Icon(Icons.Rounded.Search, contentDescription = "Search library", tint = Color.White, modifier = Modifier.size(28.dp))
-                }
-            }
-
-            item {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    userScrollEnabled = false,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.height(590.dp)
-                ) {
-                    items(libraryCards) { card ->
-                        LibraryGridCard(card = card, onClick = { navController?.navigate(card.route) })
+                    TrackArtwork(song, Modifier.size(58.dp), 6)
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(song.artist, color = foxyPalette().muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    IconButton(onClick = { onPlay(song, songs) }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = foxyPalette().accent) }
+                    IconButton(onClick = { onMore(song) }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = foxyPalette().muted) }
                 }
-            }
-
-            item {
-                if (library.likedSongs.isNotEmpty()) {
-                    MetroSectionTitle("Liked songs")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    library.likedSongs.take(5).forEach { song ->
-                        FoxySongRow(song = song, onClick = {})
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                }
-                MetroIconTile(Icons.Rounded.PlaylistPlay, "Create smart playlist", "Build a playlist from mood, artist, or song seeds")
-                Spacer(modifier = Modifier.height(90.dp))
-            }
-        }
-
-        FloatingActionButton(
-            onClick = { navController?.navigate("search") },
-            containerColor = colors.accent,
-            contentColor = Color.White,
-            shape = CircleShape,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 108.dp)
-                .size(64.dp)
-        ) {
-            Icon(Icons.Rounded.Add, contentDescription = "Create playlist", modifier = Modifier.size(30.dp))
-        }
-    }
-}
-
-@Composable
-private fun LibraryHeader(library: FoxyLibraryState) {
-    val colors = foxyPalette()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF20332E), Color(0xFF111313))))
-            .padding(18.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(colors.accent.copy(alpha = 0.22f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Rounded.Album, contentDescription = null, tint = colors.accent, modifier = Modifier.size(30.dp))
-            }
-            Column(modifier = Modifier.padding(start = 14.dp)) {
-                Text("Your Library", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
-                Text("${library.likedSongs.size} liked • ${library.savedSongs.size} saved • ${library.history.size} played", color = colors.muted, fontSize = 13.sp)
             }
         }
     }
 }
 
 @Composable
-private fun LibraryGridCard(card: LibraryCard, onClick: () -> Unit) {
-    val colors = foxyPalette()
-    Column(modifier = Modifier.clickable { onClick() }) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(card.tint.copy(alpha = 0.72f), colors.surfaceHigh, Color.Black)
-                    )
-                )
-                .padding(14.dp),
-            contentAlignment = Alignment.BottomStart
-        ) {
-            Icon(card.icon, contentDescription = null, tint = Color.White, modifier = Modifier.align(Alignment.TopStart).size(42.dp))
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.46f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Rounded.PlaylistPlay, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-            }
+private fun EmptyLibraryTab(icon: ImageVector, message: String) {
+    Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = foxyPalette().accent, modifier = Modifier.size(40.dp))
+            Text(message, color = foxyPalette().muted, modifier = Modifier.padding(top = 10.dp))
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(card.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(card.subtitle, color = colors.muted, fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun EmptyLibraryMessage(message: String) {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(foxyPalette().surface).padding(20.dp), contentAlignment = Alignment.Center) {
+        Text(message, color = foxyPalette().muted)
     }
 }
