@@ -42,10 +42,37 @@ data class Song(
     /** Best artwork URL with fallbacks */
     fun bestArtworkUrl(): String {
         return when {
-            !artworkUrl.isNullOrBlank() -> artworkUrl
-            !thumbnail.isNullOrBlank() -> thumbnail
-            else -> ""
+            !artworkUrl.isNullOrBlank() -> upgradeYouTubeThumbSize(artworkUrl)
+            !thumbnail.isNullOrBlank() -> upgradeYouTubeThumbSize(thumbnail)
+            else -> youtubePosterCandidates().firstOrNull().orEmpty()
         }
+    }
+
+    /** Prefer max-resolution YouTube poster when we only have a video id. */
+    fun highQualityArtworkUrl(): String {
+        val direct = bestArtworkUrl()
+        if (direct.isNotBlank()) return direct
+        return youtubePosterCandidates().firstOrNull().orEmpty()
+    }
+
+    private fun youtubePosterCandidates(): List<String> = listOf(
+        "https://img.youtube.com/vi/$videoId/maxresdefault.jpg",
+        "https://img.youtube.com/vi/$videoId/sddefault.jpg",
+        "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+    )
+
+    private fun upgradeYouTubeThumbSize(url: String): String {
+        if (url.isBlank()) return url
+        var u = url
+        u = u.replace("=s88-", "=s800-")
+            .replace("=s120-", "=s800-")
+            .replace("=s180-", "=s800-")
+            .replace("=s360-", "=s800-")
+            .replace("=w88-h88", "=w800-h800")
+            .replace("=w120-h120", "=w800-h800")
+            .replace("=w360-h360", "=w800-h800")
+        u = u.replace(Regex("""/(hqdefault|mqdefault|default)\.jpg"""), "/maxresdefault.jpg")
+        return u
     }
 
     /** Multiple artwork candidates for better quality selection */

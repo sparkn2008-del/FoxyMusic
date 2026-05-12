@@ -19,16 +19,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Accessibility
-import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,104 +67,175 @@ fun SettingsScreen() {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(color = colors.background)
             .padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         item {
-            Spacer(modifier = Modifier.height(22.dp))
-            Text("Settings", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-            Text("Theme, player, privacy, and navigation controls.", color = FoxyMuted, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Settings", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("Tune playback, look, and privacy.", color = colors.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
         }
 
         item {
-            SettingsSection("Appearance")
-            ThemeModePicker(settings.themeMode)
-            ToggleRow(Icons.Rounded.BlurOn, "Blur effects", "Transparent player surfaces", settings.blurEffects) {
-                FoxySettings.update { current -> current.copy(blurEffects = it) }
-            }
-            ToggleRow(Icons.Rounded.AutoAwesome, "Song-based colors", "Player and key surfaces follow the current song thumbnail", settings.dynamicSongColors) {
-                FoxySettings.update { current -> current.copy(dynamicSongColors = it) }
-            }
-            AccentPicker(selectedAccent = settings.accent, onAccentSelected = { selected ->
-                FoxySettings.update { current -> current.copy(accentArgb = selected.toArgb()) }
-            })
-        }
-
-        item {
-            SettingsSection("App Appearance Customisation")
-            IconSizePicker(settings.iconScale)
-            BottomNavSizePicker(settings.bottomNavScale)
-            ThemeModePicker(settings.themeMode)
-            AccentPicker(selectedAccent = settings.accent, onAccentSelected = { selected ->
-                FoxySettings.update { current -> current.copy(accentArgb = selected.toArgb()) }
-            })
-        }
-
-        item {
-            SettingsSection("Player")
-            ToggleRow(Icons.Rounded.Palette, "Compact player mode", "Smaller mini player controls", settings.compactPlayer) {
-                FoxySettings.update { current -> current.copy(compactPlayer = it) }
-            }
-            ToggleRow(Icons.Rounded.Gesture, "Gesture controls", "Swipe actions for playback", settings.gestureControls) {
-                FoxySettings.update { current -> current.copy(gestureControls = it) }
-            }
-            SliderRow(
-                icon = Icons.Rounded.DragIndicator,
-                title = "Grid size",
-                subtitle = "${settings.gridColumns} columns for albums and playlists",
-                value = settings.gridColumns.toFloat(),
-                onValueChange = { value ->
-                    FoxySettings.update { current -> current.copy(gridColumns = value.toInt().coerceIn(2, 4)) }
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(containerColor = colors.surface),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsSection("Look & color")
+                    ThemeModePicker(settings.themeMode)
+                    ToggleRow(Icons.Rounded.BlurOn, "Blur effects", "Player backdrop blur (Android 12+)", settings.blurEffects) {
+                        FoxySettings.update { current -> current.copy(blurEffects = it) }
+                    }
+                    ToggleRow(Icons.Rounded.AutoAwesome, "Song-based colors", "Accent follows the current track", settings.dynamicSongColors) {
+                        FoxySettings.update { current -> current.copy(dynamicSongColors = it) }
+                    }
+                    AccentPicker(selectedAccent = settings.accent, onAccentSelected = { selected ->
+                        FoxySettings.update { current -> current.copy(accentArgb = selected.toArgb()) }
+                    })
+                    IconSizePicker(settings.iconScale)
+                    BottomNavSizePicker(settings.bottomNavScale)
                 }
-            )
-        }
-
-        item {
-            SettingsSection("Navigation")
-            ToggleRow(Icons.Rounded.Accessibility, "Top action buttons", "Show history, stats, and together buttons in the top bar", settings.showTopActions) {
-                FoxySettings.update { current -> current.copy(showTopActions = it) }
-            }
-            ToggleRow(Icons.Rounded.Accessibility, "Bottom labels", "Show text labels under bottom navigation icons", settings.showBottomLabels) {
-                FoxySettings.update { current -> current.copy(showBottomLabels = it) }
             }
         }
 
         item {
-            SettingsSection("Smart Extras")
-            StaticRow(Icons.Rounded.Timer, "Sleep timer", "Stop playback after a chosen time")
-            ToggleRow(Icons.Rounded.History, "Save listening history", "Used for library history and local recommendations", settings.saveHistory) {
-                FoxySettings.update { current -> current.copy(saveHistory = it) }
-            }
-            StaticRow(Icons.Rounded.Security, "Privacy controls", "Sign out clears WebView cookies and local account session")
-            StaticRow(Icons.Rounded.BatterySaver, "Battery optimization", "Prefer lightweight playback UI")
-            StaticRow(Icons.Rounded.Accessibility, "Accessibility", "Large touch targets and clear labels")
-        }
-
-        item {
-            SettingsSection("Navigation order")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                listOf("Home", "Search", "Library", "Downloads", "Settings").forEach { label ->
-                    FilterChip(
-                        selected = label == "Home",
-                        onClick = {},
-                        label = { Text(label) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = colors.accent.copy(alpha = 0.2f),
-                            selectedLabelColor = colors.accent,
-                            labelColor = colors.muted,
-                            containerColor = colors.surface
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = Color.White.copy(alpha = 0.08f),
-                            selectedBorderColor = colors.accent.copy(alpha = 0.35f)
-                        )
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(containerColor = colors.surface),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsSection("Player & queue")
+                    ToggleRow(Icons.Rounded.Palette, "Compact mini player", "Smaller bar above navigation", settings.compactPlayer) {
+                        FoxySettings.update { current -> current.copy(compactPlayer = it) }
+                    }
+                    ToggleRow(Icons.Rounded.QueueMusic, "Remember queue", "Restore queue after restart", settings.persistentQueue) {
+                        FoxySettings.update { current -> current.copy(persistentQueue = it) }
+                    }
+                    ToggleRow(Icons.Rounded.Gesture, "Gesture controls", "Swipe mini player for prev / next / pause", settings.gestureControls) {
+                        FoxySettings.update { current -> current.copy(gestureControls = it) }
+                    }
+                    SliderRow(
+                        icon = Icons.Rounded.DragIndicator,
+                        title = "Grid columns",
+                        subtitle = "${settings.gridColumns} columns in grids",
+                        value = settings.gridColumns.toFloat(),
+                        onValueChange = { value ->
+                            FoxySettings.update { current -> current.copy(gridColumns = value.toInt().coerceIn(2, 4)) }
+                        }
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        item {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(containerColor = colors.surface),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsSection("Playback & lyrics")
+                    ToggleRow(
+                        Icons.Rounded.Block,
+                        "SponsorBlock",
+                        "Skip sponsored segments when data exists",
+                        settings.sponsorBlockEnabled
+                    ) {
+                        FoxySettings.update { c -> c.copy(sponsorBlockEnabled = it) }
+                    }
+                    CrossfadePicker(
+                        crossfadeMs = settings.crossfadeMs,
+                        onPick = { ms -> FoxySettings.update { c -> c.copy(crossfadeMs = ms) } }
+                    )
+                    ToggleRow(
+                        Icons.Rounded.Lyrics,
+                        "Prefer LRCLIB lyrics",
+                        "LRCLIB first, then YouTube captions",
+                        settings.lyricsPreferLrclib
+                    ) {
+                        FoxySettings.update { c -> c.copy(lyricsPreferLrclib = it) }
+                    }
+                }
+            }
+        }
+
+        item {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(containerColor = colors.surface),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsSection("Navigation & history")
+                    ToggleRow(Icons.Rounded.Accessibility, "Bottom labels", "Show labels under tab icons", settings.showBottomLabels) {
+                        FoxySettings.update { current -> current.copy(showBottomLabels = it) }
+                    }
+                    ToggleRow(Icons.Rounded.History, "Save listening history", "For Library history and picks", settings.saveHistory) {
+                        FoxySettings.update { current -> current.copy(saveHistory = it) }
+                    }
+                    StaticRow(Icons.Rounded.Timer, "Sleep timer", "From the full player: sleep timer pill")
+                    StaticRow(Icons.Rounded.Security, "Privacy", "Sign out clears the in-app session")
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(28.dp)) }
+    }
+}
+
+@Composable
+private fun CrossfadePicker(
+    crossfadeMs: Int,
+    onPick: (Int) -> Unit
+) {
+    val colors = foxyPalette()
+    val options = listOf(0 to "Off", 3000 to "3s", 5000 to "5s", 8000 to "8s", 12000 to "12s")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(color = colors.surface)
+            .padding(14.dp)
+    ) {
+        Text("Crossfade", color = Color.White, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Volume ramp at the start and end of each track (one ExoPlayer; not a true overlap mix).",
+            color = colors.muted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (ms, label) ->
+                FilterChip(
+                    selected = crossfadeMs == ms,
+                    onClick = { onPick(ms) },
+                    label = { Text(label) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.accent.copy(alpha = 0.22f),
+                        selectedLabelColor = colors.accent,
+                        labelColor = colors.muted,
+                        containerColor = colors.surfaceHigh
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = crossfadeMs == ms,
+                        borderColor = Color.White.copy(alpha = 0.08f),
+                        selectedBorderColor = colors.accent.copy(alpha = 0.35f)
+                    )
+                )
+            }
         }
     }
+    Spacer(modifier = Modifier.height(6.dp))
 }
 
 @Composable
@@ -183,7 +258,7 @@ private fun ToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .clickable { onCheckedChange(!checked) }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -212,7 +287,7 @@ private fun StaticRow(icon: ImageVector, title: String, subtitle: String) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -238,7 +313,7 @@ private fun SliderRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -264,7 +339,7 @@ private fun AccentPicker(selectedAccent: Color, onAccentSelected: (Color) -> Uni
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -351,7 +426,7 @@ private fun SettingChoiceRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .padding(14.dp)
     ) {
         Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -370,6 +445,8 @@ private fun SettingChoiceRow(
                         containerColor = colors.surfaceHigh
                     ),
                     border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = selectedIndex == index,
                         borderColor = Color.White.copy(alpha = 0.08f),
                         selectedBorderColor = colors.accent.copy(alpha = 0.45f)
                     )
@@ -387,7 +464,7 @@ private fun SettingsIcon(icon: ImageVector) {
         modifier = Modifier
             .size(44.dp)
             .clip(RoundedCornerShape(13.dp))
-            .background(colors.surfaceHigh),
+            .background(color = colors.surfaceHigh),
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(23.dp))

@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SearchScreen() {
+fun SearchScreen(onSongPlay: () -> Unit = {}) {
     val colors = foxyColors()                    // Updated to match new theme
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Song>>(emptyList()) }
@@ -92,14 +92,13 @@ fun SearchScreen() {
     fun playSong(song: Song) {
         loadingVideoId = song.videoId
         scope.launch {
-            withContext(Dispatchers.IO) {
-                MusicPlayer.playQueue(
-                    context,
-                    results.ifEmpty { listOf(song) },
-                    results.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
-                )
-            }
+            MusicPlayer.playQueue(
+                context,
+                results.ifEmpty { listOf(song) },
+                results.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
+            )
             loadingVideoId = null
+            onSongPlay()
         }
     }
 
@@ -115,9 +114,10 @@ fun SearchScreen() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .padding(horizontal = 18.dp)
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             SearchField(
                 query = query,
                 onQueryChange = { query = it },

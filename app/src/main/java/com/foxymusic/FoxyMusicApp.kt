@@ -1,5 +1,10 @@
 package com.foxymusic
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,10 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Groups
-import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -26,7 +28,6 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -35,9 +36,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -65,6 +67,7 @@ data class AppDestination(
     val icon: ImageVector
 )
 
+/** Home, Search, Library, and Me (profile hub). */
 private val bottomDestinations = listOf(
     AppDestination("home", "Home", Icons.Rounded.Home),
     AppDestination("search", "Search", Icons.Rounded.Search),
@@ -83,28 +86,51 @@ fun FoxyMusicApp() {
     val account by FoxyAccount.state.collectAsState()
     val colors = foxyPalette()
     val iconSize = when (settings.bottomNavScale) {
-        0 -> 21.dp
-        2 -> 29.dp
+        0 -> 22.dp
+        2 -> 28.dp
         else -> 25.dp
     }
     val navHeight = when (settings.bottomNavScale) {
-        0 -> 68.dp
-        2 -> 88.dp
-        else -> 78.dp
+        0 -> 62.dp
+        2 -> 78.dp
+        else -> 70.dp
     }
     var showPlayerSheet by remember { mutableStateOf(false) }
     var showAccountSheet by remember { mutableStateOf(false) }
 
+    val navFadeTween = tween<Float>(durationMillis = 260)
+    val navSlideTween = tween<IntOffset>(durationMillis = 260)
+
     Scaffold(
         containerColor = colors.background,
         topBar = {
-            if (currentRoute in bottomDestinations.map { it.route }) {
-                MetroTopBar(
-                    title = if (currentRoute == "home") "FoxyMusic" else bottomDestinations.first { it.route == currentRoute }.label,
-                    showActions = settings.showTopActions,
-                    onHistory = { navController.navigateSingleTop("history") },
-                    onStats = { navController.navigateSingleTop("stats") },
-                    onTogether = { navController.navigateSingleTop("settings_player") },
+            when (currentRoute) {
+                "home" -> HomeActionsBar(
+                    onSearch = { navController.navigatePrimary("search") },
+                    onProfile = { showAccountSheet = true },
+                    account = account
+                )
+                "search" -> SimpTopBar(
+                    title = "Search",
+                    subtitle = "YouTube Music catalog",
+                    showSearchAction = false,
+                    onSearch = { },
+                    onProfile = { showAccountSheet = true },
+                    account = account
+                )
+                "library" -> SimpTopBar(
+                    title = "Library",
+                    subtitle = "Liked, saved, and offline",
+                    showSearchAction = true,
+                    onSearch = { navController.navigatePrimary("search") },
+                    onProfile = { showAccountSheet = true },
+                    account = account
+                )
+                "profile" -> SimpTopBar(
+                    title = "Me",
+                    subtitle = "Profile, discovery, and account",
+                    showSearchAction = true,
+                    onSearch = { navController.navigatePrimary("search") },
                     onProfile = { showAccountSheet = true },
                     account = account
                 )
@@ -113,44 +139,55 @@ fun FoxyMusicApp() {
         bottomBar = {
             Column(
                 modifier = Modifier
-                    .background(colors.background)
-                    .padding(bottom = 6.dp)
+                    .background(color = colors.background)
+                    .padding(bottom = 4.dp)
             ) {
                 PersistentMiniPlayer(
                     state = playerState,
-                    onOpen = { showPlayerSheet = true },
-                    onArtist = { navController.navigateSingleTop("history") },
-                    onAdd = { navController.navigateSingleTop("library") }
+                    onOpen = { showPlayerSheet = true }
                 )
-                NavigationBar(
-                    containerColor = colors.background,
+                Surface(
+                    color = colors.surface.copy(alpha = 0.94f),
                     tonalElevation = 0.dp,
-                    modifier = Modifier.height(navHeight)
+                    shadowElevation = 0.dp,
+                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
                 ) {
-                    bottomDestinations.forEach { destination ->
-                        NavigationBarItem(
-                            selected = currentRoute == destination.route,
-                            onClick = { navController.navigateSingleTop(destination.route) },
-                            icon = { Icon(destination.icon, contentDescription = destination.label, modifier = Modifier.size(iconSize)) },
-                            label = if (settings.showBottomLabels) {
-                                {
-                                    Text(
-                                        destination.label,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = if (settings.bottomNavScale == 0) 11.sp else 13.sp
+                    NavigationBar(
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp,
+                        modifier = Modifier.height(navHeight)
+                    ) {
+                        bottomDestinations.forEach { destination ->
+                            NavigationBarItem(
+                                selected = currentRoute == destination.route,
+                                onClick = { navController.navigatePrimary(destination.route) },
+                                icon = {
+                                    Icon(
+                                        destination.icon,
+                                        contentDescription = destination.label,
+                                        modifier = Modifier.size(iconSize)
                                     )
-                                }
-                            } else {
-                                null
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = Color.White,
-                                selectedTextColor = Color.White,
-                                indicatorColor = colors.accent.copy(alpha = 0.42f),
-                                unselectedIconColor = colors.muted,
-                                unselectedTextColor = colors.muted
+                                },
+                                label = if (settings.showBottomLabels) {
+                                    {
+                                        Text(
+                                            destination.label,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = if (settings.bottomNavScale == 0) 11.sp else 12.sp
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = colors.accent,
+                                    selectedTextColor = colors.accent,
+                                    indicatorColor = colors.accent.copy(alpha = 0.18f),
+                                    unselectedIconColor = colors.muted,
+                                    unselectedTextColor = colors.muted
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -159,10 +196,31 @@ fun FoxyMusicApp() {
         NavHost(
             navController = navController,
             startDestination = "home",
-            modifier = Modifier.padding(paddingValues)
+            modifier = Modifier.padding(paddingValues),
+            enterTransition = {
+                fadeIn(animationSpec = navFadeTween) +
+                    slideInHorizontally(animationSpec = navSlideTween) { w -> w / 10 }
+            },
+            exitTransition = {
+                fadeOut(animationSpec = navFadeTween) +
+                    slideOutHorizontally(animationSpec = navSlideTween) { w -> -w / 14 }
+            },
+            popEnterTransition = {
+                fadeIn(animationSpec = navFadeTween) +
+                    slideInHorizontally(animationSpec = navSlideTween) { w -> -w / 14 }
+            },
+            popExitTransition = {
+                fadeOut(animationSpec = navFadeTween) +
+                    slideOutHorizontally(animationSpec = navSlideTween) { w -> w / 10 }
+            }
         ) {
-            composable("home") { HomeScreen(onPlayAll = { navController.navigateSingleTop("search") }) }
-            composable("search") { SearchScreen() }
+            composable("home") {
+                HomeScreen(
+                    onPlayAll = { navController.navigatePrimary("search") },
+                    onSongPlay = { showPlayerSheet = true }
+                )
+            }
+            composable("search") { SearchScreen(onSongPlay = { showPlayerSheet = true }) }
             composable("library") { LibraryScreen(navController) }
             composable("profile") { ProfileScreen(navController) }
             composable("history") { HistoryScreen(navController) }
@@ -190,9 +248,13 @@ fun FoxyMusicApp() {
         AccountDialog(
             onDismiss = { showAccountSheet = false },
             account = account,
+            onProfile = {
+                showAccountSheet = false
+                navController.navigateSecondary("profile")
+            },
             onLogin = {
                 showAccountSheet = false
-                navController.navigateSingleTop("login")
+                navController.navigateSecondary("login")
             },
             onLogout = {
                 FoxyAccount.signOut()
@@ -200,23 +262,19 @@ fun FoxyMusicApp() {
             },
             onSettings = {
                 showAccountSheet = false
-                navController.navigateSingleTop("settings")
+                navController.navigateSecondary("settings")
             },
             onAbout = {
                 showAccountSheet = false
-                navController.navigateSingleTop("about")
+                navController.navigateSecondary("about")
             }
         )
     }
 }
 
 @Composable
-private fun MetroTopBar(
-    title: String,
-    showActions: Boolean,
-    onHistory: () -> Unit,
-    onStats: () -> Unit,
-    onTogether: () -> Unit,
+private fun HomeActionsBar(
+    onSearch: () -> Unit,
     onProfile: () -> Unit,
     account: FoxyAccountState
 ) {
@@ -224,59 +282,96 @@ private fun MetroTopBar(
     val settings by FoxySettings.state.collectAsState()
     val iconSize = when (settings.iconScale) {
         0 -> 24.dp
-        2 -> 32.dp
-        else -> 28.dp
+        2 -> 30.dp
+        else -> 27.dp
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.background)
-            .padding(horizontal = 22.dp, vertical = 18.dp),
+            .background(color = colors.background)
+            .statusBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
-            Text(dynamicGreeting(), color = colors.muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        }
-        if (showActions) {
-            MetroTopIcon(Icons.Rounded.History, "History", iconSize, onHistory)
-            MetroTopIcon(Icons.Rounded.TrendingUp, "Stats", iconSize, onStats)
-            MetroTopIcon(Icons.Rounded.Groups, "Listen Together", iconSize, onTogether)
-        }
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFE8E8E8))
-                .clickable { onProfile() },
-            contentAlignment = Alignment.Center
-        ) {
-            if (account.avatarUrl.isNotBlank()) {
-                AsyncImage(
-                    model = account.avatarUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(38.dp)
-                )
-            } else {
-                Text(account.displayName.initials(), color = Color(0xFFB78112), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-            }
-        }
-    }
-}
-
-private fun dynamicGreeting(): String {
-    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    return when (hour) {
-        in 5..11 -> "Good morning"
-        in 12..16 -> "Good afternoon"
-        in 17..21 -> "Good evening"
-        else -> "Late night mode"
+        Spacer(modifier = Modifier.weight(1f))
+        SimpTopIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
+        Spacer(modifier = Modifier.width(4.dp))
+        ProfileAvatar(account = account, size = 38.dp, onClick = onProfile)
     }
 }
 
 @Composable
-private fun MetroTopIcon(icon: ImageVector, label: String, iconSize: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+private fun SimpTopBar(
+    title: String,
+    subtitle: String?,
+    showSearchAction: Boolean,
+    onSearch: () -> Unit,
+    onProfile: () -> Unit,
+    account: FoxyAccountState
+) {
+    val colors = foxyPalette()
+    val settings by FoxySettings.state.collectAsState()
+    val iconSize = when (settings.iconScale) {
+        0 -> 24.dp
+        2 -> 30.dp
+        else -> 27.dp
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color = colors.background)
+            .statusBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, color = colors.muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        if (showSearchAction) {
+            SimpTopIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
+            Spacer(modifier = Modifier.width(4.dp))
+        }
+        ProfileAvatar(account = account, size = 38.dp, onClick = onProfile)
+    }
+}
+
+@Composable
+private fun ProfileAvatar(
+    account: FoxyAccountState,
+    size: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color(0xFF2A2A2A))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (account.avatarUrl.isNotBlank()) {
+            AsyncImage(
+                model = account.avatarUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(size)
+            )
+        } else {
+            Text(
+                account.displayName.initials(),
+                color = foxyPalette().accent,
+                fontSize = (size.value / 3.2f).sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimpTopIcon(icon: ImageVector, label: String, iconSize: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     val colors = foxyPalette()
     IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
         Icon(icon, contentDescription = label, tint = colors.muted, modifier = Modifier.size(iconSize))
@@ -287,6 +382,7 @@ private fun MetroTopIcon(icon: ImageVector, label: String, iconSize: androidx.co
 private fun AccountDialog(
     onDismiss: () -> Unit,
     account: FoxyAccountState,
+    onProfile: () -> Unit,
     onLogin: () -> Unit,
     onLogout: () -> Unit,
     onSettings: () -> Unit,
@@ -313,12 +409,12 @@ private fun AccountDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(22.dp))
-                        .background(colors.surface)
+                        .background(color = colors.surface)
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier.size(54.dp).clip(CircleShape).background(Color.White),
+                        modifier = Modifier.size(54.dp).clip(CircleShape).background(Color(0xFF2A2A2A)),
                         contentAlignment = Alignment.Center
                     ) {
                         if (account.avatarUrl.isNotBlank()) {
@@ -329,7 +425,7 @@ private fun AccountDialog(
                                 modifier = Modifier.size(54.dp)
                             )
                         } else {
-                            Text(account.displayName.initials(), color = Color(0xFFB78112), fontWeight = FontWeight.ExtraBold)
+                            Text(account.displayName.initials(), color = colors.accent, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                     Spacer(modifier = Modifier.width(14.dp))
@@ -343,8 +439,13 @@ private fun AccountDialog(
                     }
                     MetroChip(if (account.isSignedIn) "Log out" else "Log in", onClick = if (account.isSignedIn) onLogout else onLogin)
                 }
-                MetroIconTile(Icons.Rounded.Sync, "Personal recommendations", if (account.isSignedIn) "Using your YouTube Music session" else "Sign in to unlock account recommendations", onClick = if (account.isSignedIn) ({}) else onLogin)
-                MetroIconTile(Icons.Rounded.Sync, "Library sync foundation", "Session is stored locally for future playlist and library sync")
+                MetroIconTile(Icons.Rounded.Person, "Profile & discovery", "Charts, moods, and your listening hub", onClick = onProfile)
+                MetroIconTile(
+                    Icons.Rounded.Sync,
+                    "Recommendations & library",
+                    if (account.isSignedIn) "Using your YouTube Music session for Home and future sync" else "Sign in for personalized Home and synced library features",
+                    onClick = if (account.isSignedIn) ({}) else onLogin
+                )
                 MetroIconTile(Icons.Rounded.Settings, "Settings", onClick = onSettings)
                 MetroIconTile(Icons.Rounded.Info, "About", onClick = onAbout)
             }
@@ -353,13 +454,21 @@ private fun AccountDialog(
     )
 }
 
-private fun NavController.navigateSingleTop(route: String) {
+/** Bottom tabs: switch without stacking duplicate entries. */
+private fun NavController.navigatePrimary(route: String) {
     navigate(route) {
         launchSingleTop = true
         restoreState = true
         popUpTo(graph.startDestinationId) {
             saveState = true
         }
+    }
+}
+
+/** Secondary screens keep back stack so the system back button returns to the previous tab. */
+private fun NavController.navigateSecondary(route: String) {
+    navigate(route) {
+        launchSingleTop = true
     }
 }
 

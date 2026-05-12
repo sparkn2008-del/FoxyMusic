@@ -1,8 +1,5 @@
 package com.foxymusic
 
-import androidx.compose.runtime.collectAsState
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.getValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +46,7 @@ import androidx.compose.ui.unit.sp
 fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
     val colors = foxyPalette()
     val context = LocalContext.current
-    val library by FoxyLibraryStore.state.collectAsState()
+    val library by FoxyLibraryStore.state
     val playerState by MusicPlayer.state.collectAsState()
     var menuSong by remember { mutableStateOf<Song?>(null) }
 
@@ -58,7 +55,22 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
         MusicPlayer.playQueue(context, queue, queue.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0))
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black, colors.background)))) {
+    fun lookupSong(videoId: String): Song? {
+        val pool = buildList {
+            addAll(library.savedSongs)
+            addAll(library.likedSongs)
+            addAll(library.historySongs)
+            addAll(library.downloadedSongs)
+            addAll(library.allSongs)
+        }
+        return pool.firstOrNull { it.videoId == videoId }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(brush = Brush.verticalGradient(listOf(Color.Black, colors.background)))
+    ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -73,21 +85,52 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
             if (library.downloadProgress.isNotEmpty()) {
                 item {
                     Column(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(colors.surfaceHigh).padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(color = colors.surfaceHigh)
+                            .padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text("Downloading", color = Color.White, fontWeight = FontWeight.Black)
                         library.downloadProgress.forEach { (videoId, progress) ->
-                            val song = (library.savedSongs + library.likedSongs + library.history).firstOrNull { it.videoId == videoId }
+                            val song = lookupSong(videoId)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(34.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                                Box(
+                                    Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(color = colors.accent.copy(alpha = 0.18f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Download,
+                                        contentDescription = null,
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                                 Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                                    Text(song?.title ?: "Preparing song", color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    LinearProgressIndicator(progress = progress, color = colors.accent, trackColor = colors.pill, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                                    Text(
+                                        song?.title ?: "Preparing song",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    LinearProgressIndicator(
+                                        progress = progress,
+                                        color = colors.accent,
+                                        trackColor = colors.pill,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                                    )
                                 }
-                                Text("${(progress * 100).toInt()}%", color = colors.muted, fontSize = 12.sp, modifier = Modifier.padding(start = 10.dp))
+                                Text(
+                                    "${(progress * 100).toInt()}%",
+                                    color = colors.muted,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(start = 10.dp)
+                                )
                             }
                         }
                     }
@@ -97,7 +140,11 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
             if (library.downloadedSongs.isEmpty()) {
                 item {
                     Column(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(colors.surface).padding(24.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(color = colors.surface)
+                            .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.accent, modifier = Modifier.size(38.dp))
@@ -133,17 +180,26 @@ private fun DownloadRow(song: Song, isCurrent: Boolean, isPlaying: Boolean, onPl
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (isCurrent) colors.accent.copy(alpha = 0.13f) else colors.surface.copy(alpha = 0.72f))
+            .background(
+                color = if (isCurrent) colors.accent.copy(alpha = 0.13f) else colors.surface.copy(alpha = 0.72f)
+            )
             .clickable { onPlay() }
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TrackArtwork(song, Modifier.size(58.dp), 6)
+        TrackArtwork(song = song, modifier = Modifier.size(58.dp), cornerRadius = 6.dp)
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
             Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.CloudDone, contentDescription = null, tint = colors.accent, modifier = Modifier.size(14.dp))
-                Text(song.artist, color = colors.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                Text(
+                    song.artist,
+                    color = colors.muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
             }
         }
         IconButton(onClick = onPlay) {

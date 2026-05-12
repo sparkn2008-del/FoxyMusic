@@ -7,9 +7,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -40,6 +37,7 @@ import kotlinx.coroutines.withContext
 
 private data class HomeFeed(
     val homeSections: List<RecommendationSection> = emptyList(),
+    val chartsSections: List<RecommendationSection> = emptyList(),
     val songs: List<Song> = emptyList(),
     val videos: List<Song> = emptyList(),
     val podcasts: List<Song> = emptyList(),
@@ -49,7 +47,10 @@ private data class HomeFeed(
 
 @OptIn(ExperimentalMaterialApi::class, ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(onPlayAll: () -> Unit = {}) {
+fun HomeScreen(
+    onPlayAll: () -> Unit = {},
+    onSongPlay: () -> Unit = {}
+) {
     val playerState by MusicPlayer.state.collectAsState()
     val account by FoxyAccount.state.collectAsState()
     val colors = foxyColors()                    // Changed to foxyColors()
@@ -63,12 +64,13 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
     var menuSong by remember { mutableStateOf<Song?>(null) }
 
     fun playSong(song: Song, queue: List<Song>) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             MusicPlayer.playQueue(
                 context,
                 queue.ifEmpty { listOf(song) },
                 queue.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
             )
+            onSongPlay()
         }
     }
 
@@ -79,6 +81,7 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
             val loaded = runCatching {
                 withContext(Dispatchers.IO) {
                     val home = async { YTMusicApi.homeRecommendations() }
+                    val charts = async { YTMusicApi.chartsSections() }
                     val songs = async { YTMusicApi.search("new music songs").take(20) }
                     val videos = async { YTMusicApi.videos("trending music videos").take(16) }
                     val podcasts = async { YTMusicApi.search("music podcasts").take(12) }
@@ -92,6 +95,7 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
 
                     HomeFeed(
                         homeSections = home.await(),
+                        chartsSections = charts.await(),
                         songs = songs.await(),
                         videos = videos.await(),
                         podcasts = podcasts.await(),
@@ -121,24 +125,59 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color.Black, Color(0xFF090C0B), colors.surface)))
+                .foxyRootBackground()
                 .pullRefresh(pullRefreshState),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    Text(dynamicHomeGreeting(), color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Black)
-                    Text("FoxyMusic", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Black)
-                    Text("Songs, videos, podcasts, playlists, and discovery in one place.", color = colors.muted, fontSize = 13.sp)
+                Column(Modifier.padding(horizontal = 20.dp).statusBarsPadding()) {
+                    Text(
+                        "${dynamicHomeGreeting()} · For you",
+                        color = colors.muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "Recommended",
+                        color = Color.White,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
 
-            item { MoodStrip { mood -> 
-                scope.launch { 
-                    YTMusicApi.getMoodMix(mood).also { 
-                        if (it.isNotEmpty()) MusicPlayer.playQueue(context, it, 0) 
-                    } 
-                } 
+            item {
+                SectionHeader("Quick picks", "Browse", onPlayAll)
+                Column(
+                    Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(foxyColors().surface.copy(alpha = 0.35f))
+                ) {
+                    quickSongs.take(18).forEach { song ->
+                        val isCurrent = playerState.currentSong?.videoId == song.videoId
+                        CompactHomeSong(
+                            song = song,
+                            isCurrent = isCurrent,
+                            isPlaying = isCurrent && playerState.isPlaying,
+                            onClick = { playSong(song, quickSongs) },
+                            onMore = { menuSong = song },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+            item { MoodStrip { mood ->
+                scope.launch {
+                    YTMusicApi.getMoodMix(mood).also {
+                        if (it.isNotEmpty()) {
+                            MusicPlayer.playQueue(context, it, 0)
+                            onSongPlay()
+                        }
+                    }
+                }
             } }
 
             item {
@@ -147,37 +186,23 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
                     loading = loading,
                     error = error,
                     onPlay = { quickSongs.firstOrNull()?.let { playSong(it, quickSongs) } },
-                    onRadio = { quickSongs.firstOrNull()?.let { MusicPlayer.startRadio(context, it) } }
+                    onRadio = {
+                        quickSongs.firstOrNull()?.let {
+                            scope.launch {
+                                MusicPlayer.startRadio(context, it)
+                                onSongPlay()
+                            }
+                        }
+                    }
                 )
             }
 
             item {
-                SectionHeader("Quick picks", "Search", onPlayAll)
-                LazyHorizontalGrid(
-                    rows = GridCells.Fixed(4),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth().height(300.dp)
-                ) {
-                    items(quickSongs.take(16), key = { it.videoId }) { song ->
-                        val isCurrent = playerState.currentSong?.videoId == song.videoId
-                        CompactHomeSong(
-                            song = song,
-                            isCurrent = isCurrent,
-                            isPlaying = isCurrent && playerState.isPlaying,
-                            onClick = { playSong(song, quickSongs) },
-                            onMore = { menuSong = song }
-                        )
-                    }
-                }
-            }
-
-            item {
                 DiscoveryGrid(
-                    onCharts = { scope.launch { YTMusicApi.search("top songs today").also { MusicPlayer.playQueue(context, it, 0) } } },
-                    onMood = { scope.launch { YTMusicApi.getMoodMix("Focus").also { MusicPlayer.playQueue(context, it, 0) } } },
-                    onNew = { scope.launch { YTMusicApi.search("new release music").also { MusicPlayer.playQueue(context, it, 0) } } },
-                    onPlaylists = { scope.launch { YTMusicApi.search("best music playlists").also { MusicPlayer.playQueue(context, it, 0) } } }
+                    onCharts = { scope.launch { YTMusicApi.search("top songs today").also { MusicPlayer.playQueue(context, it, 0); onSongPlay() } } },
+                    onMood = { scope.launch { YTMusicApi.getMoodMix("Focus").also { MusicPlayer.playQueue(context, it, 0); onSongPlay() } } },
+                    onNew = { scope.launch { YTMusicApi.search("new release music").also { MusicPlayer.playQueue(context, it, 0); onSongPlay() } } },
+                    onPlaylists = { scope.launch { YTMusicApi.search("best music playlists").also { MusicPlayer.playQueue(context, it, 0); onSongPlay() } } }
                 )
             }
 
@@ -185,6 +210,10 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
             item { TypeRail("Videos", Icons.Rounded.Movie, feed.videos, onSong = { playSong(it, feed.videos) }, onMore = { menuSong = it }) }
             item { TypeRail("Podcasts", Icons.Rounded.Podcasts, feed.podcasts, onSong = { playSong(it, feed.podcasts) }, onMore = { menuSong = it }) }
             item { TypeRail("Playlists", Icons.Rounded.Album, feed.playlists, onSong = { playSong(it, feed.playlists) }, onMore = { menuSong = it }) }
+
+            items(feed.chartsSections, key = { "charts:${it.title}" }) { section ->
+                RecommendationRail(section = section, onSongClick = { playSong(it, section.songs) }, onSongMore = { menuSong = it })
+            }
 
             items(feed.discovery + feed.homeSections.drop(1), key = { it.title }) { section ->
                 RecommendationRail(section = section, onSongClick = { playSong(it, section.songs) }, onSongMore = { menuSong = it })
@@ -356,12 +385,13 @@ private fun CompactHomeSong(
     isCurrent: Boolean,
     isPlaying: Boolean,
     onClick: () -> Unit,
-    onMore: () -> Unit
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = foxyColors()
     Row(
-        modifier = Modifier
-            .width(320.dp)
+        modifier = modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .background(if (isCurrent) colors.accent.copy(alpha = 0.16f) else Color.Transparent)
             .clickable { onClick() }

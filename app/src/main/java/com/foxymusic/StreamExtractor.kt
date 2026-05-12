@@ -255,6 +255,15 @@ object StreamExtractor {
             .sortedWith(
                 compareByDescending<JSONObject> { it.optInt("audioQualityRank") }
                     .thenByDescending { it.optInt("bitrate") }
+                    .thenByDescending { fmt ->
+                        val mime = fmt.optString("mimeType")
+                        when {
+                            mime.contains("opus", ignoreCase = true) -> 3
+                            mime.contains("webm", ignoreCase = true) -> 2
+                            mime.contains("mp4", ignoreCase = true) || mime.contains("m4a", ignoreCase = true) -> 1
+                            else -> 0
+                        }
+                    }
             )
             .firstNotNullOfOrNull { it.directUrl() }
             ?.let { return it }

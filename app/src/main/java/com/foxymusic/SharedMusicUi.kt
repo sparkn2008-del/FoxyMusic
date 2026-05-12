@@ -48,11 +48,11 @@ fun HomeHero(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
-            .background(Brush.linearGradient(listOf(colors.surfaceHigh, colors.surface)))
+            .background(brush = Brush.linearGradient(listOf(colors.surfaceHigh, colors.surface)))
             .padding(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TrackArtwork(song = song, modifier = Modifier.size(92.dp), cornerRadius = 22)
+            TrackArtwork(song = song, modifier = Modifier.size(92.dp), cornerRadius = 22.dp)
             Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
                 Text(account.displayName, color = colors.muted, fontSize = 13.sp, maxLines = 1)
                 Text(
@@ -73,7 +73,7 @@ fun HomeHero(
             }
             IconButton(
                 onClick = if (song == null) onRefresh else onPlay,
-                modifier = Modifier.clip(CircleShape).background(colors.accent)
+                modifier = Modifier.clip(CircleShape).background(color = colors.accent)
             ) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.White)
             }
@@ -97,7 +97,9 @@ fun FoxySongRow(
     val colors = foxyPalette()
     MetroSongRow(
         song = song,
-        modifier = Modifier.background(if (isCurrent) colors.accent.copy(alpha = 0.12f) else Color.Transparent),
+        modifier = Modifier.background(
+            color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else Color.Transparent
+        ),
         trailing = {
             if (isPlaying) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = "Playing", tint = colors.accent, modifier = Modifier.size(24.dp))
@@ -129,7 +131,7 @@ fun RecommendationRail(
                         .clip(RoundedCornerShape(6.dp))
                 ) {
                     Column(Modifier.clickable { onSongClick(song) }) {
-                        TrackArtwork(song = song, modifier = Modifier.fillMaxWidth().aspectRatio(1f), cornerRadius = 6)
+                        TrackArtwork(song = song, modifier = Modifier.fillMaxWidth().aspectRatio(1f), cornerRadius = 6.dp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(song.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(song.artist, color = foxyPalette().muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -139,7 +141,7 @@ fun RecommendationRail(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .size(34.dp)
-                            .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                            .background(color = Color.Black.copy(alpha = 0.45f), shape = CircleShape)
                     ) {
                         Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
@@ -156,7 +158,7 @@ fun LibraryHeader(library: FoxyLibraryState) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
         Text("Library", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black)
         Text(
-            "${library.likedSongs.size} liked - ${library.savedSongs.size} saved - ${library.downloadedSongs.size} downloads",
+            "${library.allSongs.size} in library - ${library.downloadedSongs.size} downloads",
             color = colors.muted,
             fontSize = 13.sp
         )

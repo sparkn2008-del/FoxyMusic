@@ -1,7 +1,5 @@
 package com.foxymusic
 
-import androidx.compose.runtime.collectAsState
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,8 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -138,7 +135,7 @@ fun DiscoverScreen(navController: NavController) {
                             .size(width = 138.dp, height = 200.dp)
                             .clickable { play(song, section.songs) }
                     ) {
-                        TrackArtwork(song, Modifier.fillMaxWidth().aspectRatio(1f), 18)
+                        TrackArtwork(song = song, modifier = Modifier.fillMaxWidth().aspectRatio(1f), cornerRadius = 18.dp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(song.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(song.artist, color = colors.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -207,8 +204,8 @@ private fun MoodGrid() {
 
 @Composable
 fun ProfileScreen(navController: NavController) {
-    val account by FoxyAccount.state.collectAsState()
-    val library by FoxyLibraryStore.state.collectAsState()
+    val account by FoxyAccount.state.collectAsStateWithLifecycle()
+    val library by FoxyLibraryStore.state
     val colors = foxyPalette()
     LaunchedEffect(account.cookie) {
         if (account.isSignedIn) {
@@ -220,7 +217,7 @@ fun ProfileScreen(navController: NavController) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(color = colors.background)
             .padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -256,7 +253,7 @@ fun ProfileScreen(navController: NavController) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 ProfileStat(library.likedSongs.size.toString(), "Liked", Modifier.weight(1f))
                 ProfileStat(library.savedSongs.size.toString(), "Saved", Modifier.weight(1f))
-                ProfileStat(library.history.size.toString(), "Played", Modifier.weight(1f))
+                ProfileStat(library.historySongs.size.toString(), "Played", Modifier.weight(1f))
             }
         }
 
@@ -279,7 +276,7 @@ private fun ProfileStat(value: String, label: String, modifier: Modifier) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
+            .background(color = colors.surface)
             .padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

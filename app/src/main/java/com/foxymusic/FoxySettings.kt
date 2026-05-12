@@ -15,9 +15,17 @@ data class FoxyCustomization(
     val iconScale: Int = 1,
     val bottomNavScale: Int = 0,
     val gridColumns: Int = 2,
-    val showTopActions: Boolean = true,
     val showBottomLabels: Boolean = true,
-    val accentArgb: Int = 0xFFFF7A45.toInt()
+    /** Restore last queue and transport state after the app restarts. */
+    val persistentQueue: Boolean = true,
+    /** Default accent: YouTube Music–style red. */
+    val accentArgb: Int = 0xFFFF1744.toInt(),
+    /** Auto-skip sponsor / promo segments via SponsorBlock. */
+    val sponsorBlockEnabled: Boolean = true,
+    /** Crossfade at track boundaries (volume ramp, single player). 0 = off. */
+    val crossfadeMs: Int = 0,
+    /** Prefer LRCLIB synced lyrics; otherwise try YouTube transcript first. */
+    val lyricsPreferLrclib: Boolean = true
 ) {
     val accent: Color
         get() = Color(accentArgb)
@@ -35,9 +43,12 @@ object FoxySettings {
     private const val ICON_SCALE = "icon_scale"
     private const val BOTTOM_NAV_SCALE = "bottom_nav_scale"
     private const val GRID_COLUMNS = "grid_columns"
-    private const val TOP_ACTIONS = "top_actions"
     private const val BOTTOM_LABELS = "bottom_labels"
+    private const val PERSISTENT_QUEUE = "persistent_queue"
     private const val ACCENT = "accent"
+    private const val SPONSOR_BLOCK = "sponsor_block"
+    private const val CROSSFADE_MS = "crossfade_ms"
+    private const val LYRICS_LRCLIB = "lyrics_lrclib_first"
 
     private val _state = MutableStateFlow(FoxyCustomization())
     val state: StateFlow<FoxyCustomization> = _state
@@ -56,15 +67,26 @@ object FoxySettings {
             iconScale = prefs.getInt(ICON_SCALE, 1).coerceIn(0, 2),
             bottomNavScale = prefs.getInt(BOTTOM_NAV_SCALE, 0).coerceIn(0, 2),
             gridColumns = prefs.getInt(GRID_COLUMNS, 2).coerceIn(2, 4),
-            showTopActions = prefs.getBoolean(TOP_ACTIONS, true),
             showBottomLabels = prefs.getBoolean(BOTTOM_LABELS, true),
-            accentArgb = prefs.getInt(ACCENT, 0xFFFF7A45.toInt())
+            persistentQueue = prefs.getBoolean(PERSISTENT_QUEUE, true),
+            accentArgb = prefs.getInt(ACCENT, 0xFFFF1744.toInt()),
+            sponsorBlockEnabled = prefs.getBoolean(SPONSOR_BLOCK, true),
+            crossfadeMs = prefs.getInt(CROSSFADE_MS, 0).let { v ->
+                when (v) {
+                    3000, 5000, 8000, 12000 -> v
+                    else -> 0
+                }
+            },
+            lyricsPreferLrclib = prefs.getBoolean(LYRICS_LRCLIB, true)
         )
     }
 
     fun update(transform: (FoxyCustomization) -> FoxyCustomization) {
         val next = transform(_state.value)
         _state.value = next
+        if (!next.persistentQueue) {
+            appContext?.let { PlaybackPersistence.clearSession(it) }
+        }
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
             ?.putInt(THEME_MODE, next.themeMode)
             ?.putBoolean(BLUR, next.blurEffects)
@@ -75,9 +97,12 @@ object FoxySettings {
             ?.putInt(ICON_SCALE, next.iconScale)
             ?.putInt(BOTTOM_NAV_SCALE, next.bottomNavScale)
             ?.putInt(GRID_COLUMNS, next.gridColumns)
-            ?.putBoolean(TOP_ACTIONS, next.showTopActions)
             ?.putBoolean(BOTTOM_LABELS, next.showBottomLabels)
+            ?.putBoolean(PERSISTENT_QUEUE, next.persistentQueue)
             ?.putInt(ACCENT, next.accentArgb)
+            ?.putBoolean(SPONSOR_BLOCK, next.sponsorBlockEnabled)
+            ?.putInt(CROSSFADE_MS, next.crossfadeMs)
+            ?.putBoolean(LYRICS_LRCLIB, next.lyricsPreferLrclib)
             ?.apply()
     }
 }
@@ -99,13 +124,14 @@ fun FoxyCustomization.palette(dynamicAccent: Color? = null, systemDark: Boolean 
         else -> systemDark
     }
     return if (dark) {
+        // Dark neutrals: deep black base with clearly separated elevated surfaces.
         FoxyPalette(
-            background = Color.Black,
-            surface = Color(0xFF111313),
-            surfaceHigh = Color(0xFF1A2020),
-            pill = Color(0xFF242B29),
+            background = Color(0xFF000000),
+            surface = Color(0xFF1E1E1E),
+            surfaceHigh = Color(0xFF2C2C2C),
+            pill = Color(0xFF383838),
             accent = accent,
-            muted = Color(0xFFB9C8C3)
+            muted = Color(0xFFA8A8A8)
         )
     } else {
         FoxyPalette(

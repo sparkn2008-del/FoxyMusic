@@ -1,6 +1,8 @@
 package com.foxymusic
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -11,6 +13,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,16 +21,29 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.random.Random
+
+enum class SleepTimerMode { Off, AfterMinutes, AfterCurrentTrack }
+
+/** Shown in the player UI; mirrors scheduled sleep timer / end-of-track stop. */
+data class SleepTimerUiState(
+    val mode: SleepTimerMode = SleepTimerMode.Off,
+    /** Wall-clock time when a timed sleep fires; only for [SleepTimerMode.AfterMinutes]. */
+    val fireAtEpochMs: Long = 0L
+)
 
 data class PlayerUiState(
     val currentSong: Song? = null,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     val durationMs: Long = 0L,
+    /** Driven by ExoPlayer position updates for consistent mini + full player UI. */
+    val positionMs: Long = 0L,
+    val bufferedFraction: Float = 0f,
     val error: String? = null,
     val queue: List<Song> = emptyList(),
     val queueIndex: Int = -1,
@@ -46,10 +62,156 @@ object MusicPlayer {
     private var shuffleEnabled = false
     private var repeatMode = RepeatMode.Off
     private var sleepJob: Job? = null
+    private var progressJob: Job? = null
     private var stopAfterCurrentSong = false
+    /** User-requested output level; combined with crossfade ramps. */
+    private var userVolume = 1f
+    private var sponsorRangesMs: List<Pair<Long, Long>> = emptyList()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state
+    private val _sleepTimerState = MutableStateFlow(SleepTimerUiState())
+    val sleepTimerState: StateFlow<SleepTimerUiState> = _sleepTimerState
+
+    /** Load persisted queue metadata (no automatic playback until the user presses play). */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        restorePersistedSession(context.applicationContext)
+    }
+
+    private fun restorePersistedSession(context: Context) {
+        if (!FoxySettings.state.value.persistentQueue) return
+        val session = PlaybackPersistence.loadSession(context) ?: return
+        queue = session.queue
+        queueIndex = session.queueIndex
+        shuffleEnabled = session.shuffle
+        repeatMode = when (session.repeatOrdinal) {
+            1 -> RepeatMode.All
+            2 -> RepeatMode.One
+            else -> RepeatMode.Off
+        }
+        val song = queue.getOrNull(queueIndex)
+        _state.value = PlayerUiState(
+            currentSong = song,
+            isPlaying = false,
+            isBuffering = false,
+            durationMs = 0L,
+            positionMs = session.positionMs.coerceAtLeast(0L),
+            bufferedFraction = 0f,
+            error = null,
+            queue = queue,
+            queueIndex = queueIndex,
+            shuffleEnabled = shuffleEnabled,
+            repeatMode = repeatMode
+        )
+    }
+
+    private fun persistPlaybackSnapshot() {
+        val ctx = appContext ?: return
+        if (!FoxySettings.state.value.persistentQueue) return
+        if (queue.isEmpty()) {
+            PlaybackPersistence.clearSession(ctx)
+            return
+        }
+        val pos = player?.currentPosition?.coerceAtLeast(0L) ?: _state.value.positionMs
+        PlaybackPersistence.saveSession(
+            ctx,
+            queue,
+            queueIndex,
+            shuffleEnabled,
+            repeatMode.ordinal,
+            pos
+        )
+    }
+
+    private fun startProgressTicker() {
+        progressJob?.cancel()
+        progressJob = scope.launch {
+            while (isActive && player != null) {
+                val p = player ?: break
+                val durRaw = p.duration
+                val dur = if (durRaw > 0L) durRaw else _state.value.durationMs
+                val pos = p.currentPosition.coerceAtLeast(0L)
+                val buffered =
+                    if (dur > 0L) {
+                        (p.bufferedPosition.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                _state.update {
+                    it.copy(
+                        positionMs = pos,
+                        durationMs = dur.takeIf { d -> d > 0L } ?: it.durationMs,
+                        bufferedFraction = buffered
+                    )
+                }
+                applyVolumeCrossfade()
+                maybeSkipSponsor(pos)
+                delay(320)
+            }
+        }
+    }
+
+    private fun applyVolumeCrossfade() {
+        val p = player ?: return
+        val cross = FoxySettings.state.value.crossfadeMs
+        if (cross <= 0) {
+            p.volume = userVolume
+            return
+        }
+        val dur = p.duration.takeIf { it > 0L } ?: _state.value.durationMs.takeIf { it > 0L } ?: run {
+            p.volume = userVolume
+            return
+        }
+        val pos = p.currentPosition.coerceAtLeast(0L)
+        val c = cross.toLong()
+        val rem = (dur - pos).coerceAtLeast(0L)
+        val fadeOut = if (rem < c) (rem.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
+        val fadeIn = if (pos < c) (pos.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
+        p.volume = userVolume * minOf(fadeOut, fadeIn)
+    }
+
+    private fun maybeSkipSponsor(positionMs: Long) {
+        if (!FoxySettings.state.value.sponsorBlockEnabled || sponsorRangesMs.isEmpty()) return
+        val p = player ?: return
+        val dur = p.duration.takeIf { it > 0L } ?: _state.value.durationMs
+        val posSec = positionMs / 1000.0
+        for ((startMs, endMs) in sponsorRangesMs) {
+            val start = startMs / 1000.0
+            val end = endMs / 1000.0
+            if (posSec >= start && posSec < end - 0.07) {
+                val target = if (dur > 0L) endMs.coerceAtMost(dur) else endMs
+                p.seekTo(target)
+                _state.update { it.copy(positionMs = target) }
+                Log.d("FoxyMusic", "SponsorBlock: skipped to ${target}ms")
+                return
+            }
+        }
+    }
+
+    private fun loadSponsorSegments(videoId: String) {
+        sponsorRangesMs = emptyList()
+        if (!FoxySettings.state.value.sponsorBlockEnabled || videoId.isBlank()) return
+        scope.launch(Dispatchers.IO) {
+            val ranges = SponsorBlockApi.fetchSkipRangesSeconds(videoId).map { (s, e) ->
+                (s * 1000).toLong() to (e * 1000).toLong()
+            }
+            withContext(Dispatchers.Main.immediate) {
+                if (_state.value.currentSong?.videoId == videoId) {
+                    sponsorRangesMs = ranges
+                }
+            }
+        }
+    }
+
+    private fun stopProgressTicker() {
+        progressJob?.cancel()
+        progressJob = null
+    }
+
+    private var mediaSessionHolder: MediaSession? = null
+    val mediaSession: MediaSession?
+        get() = mediaSessionHolder
 
     fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
@@ -89,6 +251,8 @@ object MusicPlayer {
                 isBuffering = true,
                 isPlaying = false,
                 error = null,
+                positionMs = 0L,
+                bufferedFraction = 0f,
                 queue = queue,
                 queueIndex = queueIndex,
                 shuffleEnabled = shuffleEnabled,
@@ -115,14 +279,13 @@ object MusicPlayer {
             currentSong = song,
             isBuffering = true,
             error = null,
+            positionMs = 0L,
+            bufferedFraction = 0f,
             queue = queue,
             queueIndex = queueIndex,
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode
         )
-        runCatching { PlaybackService.start(context.applicationContext) }
-            .onFailure { Log.w("FoxyMusic", "Playback service could not start yet", it) }
-
         try {
             if (player == null) {
                 val httpFactory = DefaultHttpDataSource.Factory()
@@ -147,18 +310,24 @@ object MusicPlayer {
                             Player.STATE_READY -> Log.d("FoxyMusic", "Ready to play!")
                             Player.STATE_ENDED -> {
                                 Log.d("FoxyMusic", "Playback ended")
-                                if (stopAfterCurrentSong) {
-                                    stopAfterCurrentSong = false
-                                    pause()
-                                    return
-                                }
-                                when (repeatMode) {
-                                    RepeatMode.One -> {
-                                        player?.seekTo(0)
-                                        player?.playWhenReady = true
+                                // Never call prepare/stop/playNext synchronously from Player.Listener — ExoPlayer can crash.
+                                scope.launch {
+                                    delay(40)
+                                    if (appContext == null) return@launch
+                                    if (stopAfterCurrentSong) {
+                                        stopAfterCurrentSong = false
+                                        _sleepTimerState.value = SleepTimerUiState()
+                                        pause()
+                                        return@launch
                                     }
-                                    RepeatMode.All -> playNext(loop = true)
-                                    RepeatMode.Off -> playNext()
+                                    when (repeatMode) {
+                                        RepeatMode.One -> {
+                                            player?.seekTo(0)
+                                            player?.playWhenReady = true
+                                        }
+                                        RepeatMode.All -> playNext(loop = true)
+                                        RepeatMode.Off -> playNext()
+                                    }
                                 }
                             }
                             Player.STATE_IDLE -> Log.d("FoxyMusic", "Player idle")
@@ -180,9 +349,12 @@ object MusicPlayer {
                         _state.update {
                             it.copy(isPlaying = isPlaying, isBuffering = false, error = null)
                         }
+                        persistPlaybackSnapshot()
                     }
                 })
             }
+
+            syncMediaSession(context.applicationContext)
 
             player?.stop()
             player?.clearMediaItems()
@@ -200,8 +372,10 @@ object MusicPlayer {
             player?.setMediaItem(mediaItem)
             player?.prepare()
             player?.playWhenReady = true
-            runCatching { PlaybackService.updateNowPlaying(context.applicationContext) }
-                .onFailure { Log.w("FoxyMusic", "Playback notification update failed", it) }
+            loadSponsorSegments(song.videoId)
+            applyVolumeCrossfade()
+            startProgressTicker()
+            persistPlaybackSnapshot()
 
         } catch (e: Exception) {
             Log.e("FoxyMusic", "Exception in play(): ${e.message}")
@@ -236,7 +410,12 @@ object MusicPlayer {
     fun duration(): Long = player?.duration?.takeIf { it > 0 } ?: state.value.durationMs
 
     fun seekTo(positionMs: Long) {
-        scope.launch { player?.seekTo(positionMs.coerceAtLeast(0L)) }
+        val pos = positionMs.coerceAtLeast(0L)
+        scope.launch {
+            player?.seekTo(pos)
+            _state.update { it.copy(positionMs = pos) }
+            persistPlaybackSnapshot()
+        }
     }
 
     fun playNext(loop: Boolean = false) {
@@ -268,7 +447,10 @@ object MusicPlayer {
     }
 
     fun setVolume(volume: Float) {
-        scope.launch { player?.volume = volume.coerceIn(0f, 1f) }
+        userVolume = volume.coerceIn(0f, 1f)
+        scope.launch {
+            applyVolumeCrossfade()
+        }
     }
 
     fun setPlaybackAdjustments(speed: Float, pitch: Float) {
@@ -280,6 +462,7 @@ object MusicPlayer {
     fun toggleShuffle() {
         shuffleEnabled = !shuffleEnabled
         _state.update { it.copy(shuffleEnabled = shuffleEnabled) }
+        persistPlaybackSnapshot()
     }
 
     fun cycleRepeatMode() {
@@ -289,19 +472,47 @@ object MusicPlayer {
             RepeatMode.One -> RepeatMode.Off
         }
         _state.update { it.copy(repeatMode = repeatMode) }
+        persistPlaybackSnapshot()
     }
 
     fun addToQueue(song: Song) {
         queue = (queue + song).distinctBy { it.videoId }
         _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+        persistPlaybackSnapshot()
+    }
+
+    fun enqueuePlayNext(song: Song) {
+        scope.launch {
+            if (queue.isEmpty()) {
+                val ctx = appContext ?: return@launch
+                play(ctx, song)
+                return@launch
+            }
+            val without = queue.filterNot { it.videoId == song.videoId }.toMutableList()
+            val insertAt = (queueIndex + 1).coerceIn(0, without.size)
+            without.add(insertAt, song)
+            queue = without
+            if (queueIndex >= queue.size) queueIndex = queue.lastIndex.coerceAtLeast(0)
+            _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+            persistPlaybackSnapshot()
+        }
     }
 
     fun removeFromQueue(song: Song) {
         val removedIndex = queue.indexOfFirst { it.videoId == song.videoId }
         queue = queue.filterNot { it.videoId == song.videoId }
         if (removedIndex != -1 && queueIndex > removedIndex) queueIndex -= 1
-        queueIndex = queueIndex.coerceAtMost(queue.lastIndex)
+        queueIndex = if (queue.isEmpty()) -1 else queueIndex.coerceAtMost(queue.lastIndex)
         _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+        persistPlaybackSnapshot()
+    }
+
+    fun skipToQueueIndex(context: Context, index: Int) {
+        scope.launch {
+            if (queue.isEmpty()) return@launch
+            queueIndex = index.coerceIn(0, queue.lastIndex)
+            playPrepared(context.applicationContext, queue[queueIndex])
+        }
     }
 
     fun startRadio(context: Context, seed: Song) {
@@ -316,8 +527,11 @@ object MusicPlayer {
     fun scheduleSleepTimer(minutes: Int) {
         sleepJob?.cancel()
         stopAfterCurrentSong = false
+        val end = System.currentTimeMillis() + minutes * 60_000L
+        _sleepTimerState.value = SleepTimerUiState(SleepTimerMode.AfterMinutes, end)
         sleepJob = scope.launch {
             delay(minutes * 60_000L)
+            _sleepTimerState.value = SleepTimerUiState()
             pause()
         }
     }
@@ -325,21 +539,52 @@ object MusicPlayer {
     fun sleepAfterCurrentSong() {
         sleepJob?.cancel()
         stopAfterCurrentSong = true
+        _sleepTimerState.value = SleepTimerUiState(SleepTimerMode.AfterCurrentTrack, 0L)
     }
 
     fun cancelSleepTimer() {
         sleepJob?.cancel()
         sleepJob = null
         stopAfterCurrentSong = false
+        _sleepTimerState.value = SleepTimerUiState()
     }
 
     fun release() {
         scope.launch {
+            persistPlaybackSnapshot()
+            stopProgressTicker()
+            mediaSessionHolder?.release()
+            mediaSessionHolder = null
             player?.release()
             player = null
+            stopMediaSessionService()
             _state.value = PlayerUiState()
+            _sleepTimerState.value = SleepTimerUiState()
+            sponsorRangesMs = emptyList()
             Log.d("FoxyMusic", "Player released")
         }
+    }
+
+    private fun syncMediaSession(context: Context) {
+        val p = player ?: return
+        if (mediaSessionHolder == null) {
+            mediaSessionHolder = MediaSession.Builder(context.applicationContext, p).build()
+        }
+        startMediaSessionService(context.applicationContext)
+    }
+
+    private fun startMediaSessionService(context: Context) {
+        val intent = Intent(context, FoxyMediaSessionService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    private fun stopMediaSessionService() {
+        val ctx = appContext ?: return
+        runCatching { ctx.stopService(Intent(ctx, FoxyMediaSessionService::class.java)) }
     }
 }
 

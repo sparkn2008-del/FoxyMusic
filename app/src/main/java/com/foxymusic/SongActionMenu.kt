@@ -65,7 +65,7 @@ fun SongActionMenu(
             }
 
             ActionItem(Icons.Rounded.QueuePlayNext, "Play Next") {
-                MusicPlayer.playNext(song)
+                MusicPlayer.enqueuePlayNext(song)
                 onDismiss()
             }
 

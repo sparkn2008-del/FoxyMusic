@@ -12,6 +12,10 @@ import java.io.File
 data class FoxyLibraryState(
     val allSongs: List<Song> = emptyList(),
     val downloadedSongs: List<Song> = emptyList(),
+    val historySongs: List<Song> = emptyList(),
+    val likedSongs: List<Song> = emptyList(),
+    val savedSongs: List<Song> = emptyList(),
+    val downloadProgress: Map<String, Float> = emptyMap(),
     val isLoading: Boolean = false
 ) {
     fun isDownloaded(song: Song?): Boolean {
@@ -41,6 +45,18 @@ object FoxyLibraryStore {
         }
     }
 
+    fun toggleLiked(song: Song) {
+        val current = state.value
+        val liked = current.likedSongs.any { it.videoId == song.videoId }
+        val nextLiked =
+            if (liked) current.likedSongs.filterNot { it.videoId == song.videoId }
+            else current.likedSongs + song
+        state.value = current.copy(likedSongs = nextLiked.distinctBy { it.videoId })
+    }
+
+    fun isLiked(song: Song?): Boolean =
+        song != null && state.value.likedSongs.any { it.videoId == song.videoId }
+
     fun addSong(song: Song) {
         val current = state.value
         val updatedList = current.allSongs + song.copy(isDownloaded = false)
@@ -48,6 +64,14 @@ object FoxyLibraryStore {
         state.value = current.copy(
             allSongs = updatedList.distinctBy { it.videoId }
         )
+    }
+
+    fun addHistory(song: Song) {
+        val current = state.value
+        val nextHistory = (listOf(song) + current.historySongs)
+            .distinctBy { it.videoId }
+            .take(200)
+        state.value = current.copy(historySongs = nextHistory)
     }
 
     fun markAsDownloaded(song: Song, localPath: String) {

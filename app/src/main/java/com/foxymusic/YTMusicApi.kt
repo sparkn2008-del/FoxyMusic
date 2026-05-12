@@ -57,6 +57,22 @@ object YTMusicApi {
         return parseSections(json).ifEmpty { fallbackSections() }
     }
 
+    /** YouTube Music charts browse + text fallbacks for richer Home. */
+    suspend fun chartsSections(): List<RecommendationSection> {
+        val json = post("browse", JSONObject().apply {
+            put("context", clientContext())
+            put("browseId", "FEmusic_charts")
+        })
+        if (json != null) {
+            val parsed = parseSections(json)
+            if (parsed.isNotEmpty()) return parsed.take(8)
+        }
+        return listOf(
+            RecommendationSection("Charting now", search("billboard hot 100 songs").take(14)),
+            RecommendationSection("Trending worldwide", search("trending songs global").take(14))
+        ).filter { it.songs.isNotEmpty() }
+    }
+
     suspend fun search(query: String, filter: String? = filterSongs): List<Song> {
         if (query.isBlank()) return emptyList()
 
@@ -204,13 +220,15 @@ object YTMusicApi {
             val thumbnail = renderer.findThumbnail()
             val playlistId = renderer.findPlaylistId()
 
+            val poster = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
             songs += Song(
                 videoId = videoId,
                 title = title,
                 artist = artist,
-                thumbnail = thumbnail,
-                album = null,           // Can be improved later
-                playlistId = playlistId
+                thumbnail = thumbnail.ifBlank { poster },
+                album = null,
+                playlistId = playlistId,
+                artworkUrl = poster
             )
         }
         return songs
@@ -220,9 +238,9 @@ object YTMusicApi {
         RecommendationSection(
             "Quick picks",
             listOf(
-                Song("jfKfPfyJRdk", "lofi hip hop radio", "Lofi Girl"),
-                Song("5qap5aO4i9A", "chill beats", "YouTube Music"),
-                Song("DWcJFNfaw9c", "focus radio", "YouTube Music")
+                Song("jfKfPfyJRdk", "lofi hip hop radio", "Lofi Girl", artworkUrl = "https://img.youtube.com/vi/jfKfPfyJRdk/maxresdefault.jpg"),
+                Song("5qap5aO4i9A", "chill beats", "YouTube Music", artworkUrl = "https://img.youtube.com/vi/5qap5aO4i9A/maxresdefault.jpg"),
+                Song("DWcJFNfaw9c", "focus radio", "YouTube Music", artworkUrl = "https://img.youtube.com/vi/DWcJFNfaw9c/maxresdefault.jpg")
             )
         )
     )
@@ -260,14 +278,26 @@ object YTMusicApi {
     }
 
     private fun JSONObject.findThumbnail(): String {
-        var url = ""
+        var bestUrl = ""
+        var bestArea = 0
+        var fallbackUrl = ""
         walkObjects(this) { obj ->
-            if (url.isBlank()) {
-                val thumbnails = obj.optJSONArray("thumbnails")
-                url = thumbnails?.optJSONObject(thumbnails.length() - 1)?.optString("url").orEmpty()
+            val thumbnails = obj.optJSONArray("thumbnails") ?: return@walkObjects
+            for (i in 0 until thumbnails.length()) {
+                val t = thumbnails.optJSONObject(i) ?: continue
+                val w = t.optInt("width", 0)
+                val h = t.optInt("height", 0)
+                val area = if (w > 0 && h > 0) w * h else 0
+                val url = t.optString("url")
+                if (url.isBlank()) continue
+                if (fallbackUrl.isBlank()) fallbackUrl = url
+                if (area > bestArea) {
+                    bestArea = area
+                    bestUrl = url
+                }
             }
         }
-        return url
+        return bestUrl.ifBlank { fallbackUrl }
     }
 
     private fun JSONObject.findTextRuns(): List<String> {

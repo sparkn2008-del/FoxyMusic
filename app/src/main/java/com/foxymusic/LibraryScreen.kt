@@ -62,7 +62,7 @@ private val libraryTabs = listOf("Songs", "Playlists", "Albums", "Artists", "Pod
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(navController: NavController? = null) {
-    val library by FoxyLibraryStore.state.collectAsState()
+    val library by FoxyLibraryStore.state
     val playerState by MusicPlayer.state.collectAsState()
     val colors = foxyPalette()
     val context = LocalContext.current
@@ -77,11 +77,27 @@ fun LibraryScreen(navController: NavController? = null) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color.Black, colors.background)))
+            .background(brush = Brush.verticalGradient(listOf(Color.Black, colors.background)))
     ) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-            Text("Library", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
-            Text("Your liked, saved, downloaded, and recently played music.", color = colors.muted, fontSize = 13.sp)
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
+            Text("Your collection", color = colors.muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(colors.surfaceHigh)
+                    .clickable { navController?.navigate("profile") { launchSingleTop = true } }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
+                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                    Text("Profile & discovery", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Charts, moods, stats, and more", color = colors.muted, fontSize = 12.sp)
+                }
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = colors.muted)
+            }
         }
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -93,8 +109,8 @@ fun LibraryScreen(navController: NavController? = null) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LibraryTile(Icons.Rounded.History, "History", "${library.history.size}", Modifier.weight(1f)) {
-                library.history.firstOrNull()?.let { play(it, library.history) }
+            LibraryTile(Icons.Rounded.History, "History", "${library.historySongs.size}", Modifier.weight(1f)) {
+                library.historySongs.firstOrNull()?.let { play(it, library.historySongs) }
             }
             LibraryTile(Icons.Rounded.Search, "Find more", "Search", Modifier.weight(1f)) {
                 navController?.navigate("search")
@@ -120,16 +136,16 @@ fun LibraryScreen(navController: NavController? = null) {
             when (page) {
                 0 -> SongListTab(
                     title = "Liked songs",
-                    songs = library.likedSongs.ifEmpty { library.savedSongs.ifEmpty { library.history } },
+                    songs = library.likedSongs.ifEmpty { library.savedSongs.ifEmpty { library.historySongs } },
                     playerState = playerState,
                     onPlay = ::play,
                     onMore = { menuSong = it }
                 )
                 1 -> CollectionTab(Icons.Rounded.LibraryMusic, "Saved music", library.savedSongs, ::play, { menuSong = it })
                 2 -> CollectionTab(Icons.Rounded.Album, "Albums from saved songs", library.savedSongs.distinctBy { it.album ?: it.artist }, ::play, { menuSong = it })
-                3 -> CollectionTab(Icons.Rounded.Person, "Artists", library.history.distinctBy { it.artist }, ::play, { menuSong = it })
+                3 -> CollectionTab(Icons.Rounded.Person, "Artists", library.historySongs.distinctBy { it.artist }, ::play, { menuSong = it })
                 4 -> EmptyLibraryTab(Icons.Rounded.Podcasts, "Podcasts will appear here after playback or saving.")
-                5 -> CollectionTab(Icons.Rounded.Movie, "Videos", library.history, ::play, { menuSong = it })
+                5 -> CollectionTab(Icons.Rounded.Movie, "Videos", library.historySongs, ::play, { menuSong = it })
             }
         }
     }
@@ -144,12 +160,12 @@ private fun LibraryTile(icon: ImageVector, title: String, value: String, modifie
         modifier = modifier
             .height(86.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Brush.linearGradient(listOf(colors.surfaceHigh, colors.surface)))
+            .background(brush = Brush.linearGradient(listOf(colors.surfaceHigh, colors.surface)))
             .clickable { onClick() }
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(42.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(42.dp).clip(CircleShape).background(color = colors.accent.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = colors.accent)
         }
         Column(Modifier.padding(start = 12.dp)) {
@@ -207,10 +223,10 @@ private fun CollectionTab(
         } else {
             items(songs, key = { it.videoId }) { song ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(foxyPalette().surface.copy(alpha = 0.7f)).clickable { onPlay(song, songs) }.padding(10.dp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(color = foxyPalette().surface.copy(alpha = 0.7f)).clickable { onPlay(song, songs) }.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TrackArtwork(song, Modifier.size(58.dp), 6)
+                    TrackArtwork(song = song, modifier = Modifier.size(58.dp), cornerRadius = 6.dp)
                     Column(Modifier.padding(start = 12.dp).weight(1f)) {
                         Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(song.artist, color = foxyPalette().muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -235,7 +251,7 @@ private fun EmptyLibraryTab(icon: ImageVector, message: String) {
 
 @Composable
 private fun EmptyLibraryMessage(message: String) {
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(foxyPalette().surface).padding(20.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(color = foxyPalette().surface).padding(20.dp), contentAlignment = Alignment.Center) {
         Text(message, color = foxyPalette().muted)
     }
 }

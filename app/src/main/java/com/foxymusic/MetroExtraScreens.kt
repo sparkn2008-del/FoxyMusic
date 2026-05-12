@@ -94,7 +94,8 @@ fun HistoryScreen(navController: NavController) {
         item { MetroSectionTitle("Today") }
         items(historySongs) { song ->
             MetroSongRow(song, trailing = {
-                Icon(Icons.Rounded.DensityMedium, contentDescription = "More", tint = MetroMuted)
+                val colors = foxyPalette()
+                Icon(Icons.Rounded.DensityMedium, contentDescription = "More", tint = colors.muted)
             })
         }
     }
@@ -237,18 +238,19 @@ fun UpdaterScreen(navController: NavController) {
 fun AboutScreen(navController: NavController) {
     MetroBackScaffold("About", navController) {
         item {
+            val colors = foxyPalette()
             Column(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MetroSurface).padding(28.dp)
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(color = colors.surface).padding(28.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = MetroAccent, modifier = Modifier.size(58.dp))
+                    Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(58.dp))
                     Column(modifier = Modifier.padding(start = 20.dp)) {
                         Text("FoxyMusic", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-                        Text("1.0  UNIVERSAL", color = MetroAccent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("1.0  UNIVERSAL", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(modifier = Modifier.height(22.dp))
-                Text("A fast, premium music client built for search, recommendations, smooth playback, and a clean AMOLED interface.", color = MetroMuted, fontSize = 15.sp)
+                Text("A fast, premium music client built for search, recommendations, smooth playback, and a clean AMOLED interface.", color = colors.muted, fontSize = 15.sp)
             }
         }
         item { MetroLabel("Community & Info") }
@@ -264,8 +266,9 @@ private fun MetroBackScaffold(
     navController: NavController,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
 ) {
+    val colors = foxyPalette()
     Column(
-        modifier = Modifier.fillMaxSize().background(MetroBlack)
+        modifier = Modifier.fillMaxSize().background(color = colors.background)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 18.dp),
@@ -286,7 +289,8 @@ private fun MetroBackScaffold(
 
 @Composable
 private fun MetroLabel(label: String) {
-    Text(label, color = MetroAccent, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
+    val colors = foxyPalette()
+    Text(label, color = colors.accent, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp))
 }
 
 @Composable
@@ -303,8 +307,9 @@ private fun MetroSliderRow(
     valueRange: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit
 ) {
+    val colors = foxyPalette()
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MetroSurface).padding(14.dp)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(color = colors.surface).padding(14.dp)
     ) {
         MetroIconTile(icon, title, subtitle)
         Slider(value = value, onValueChange = onValueChange, valueRange = valueRange)
@@ -313,9 +318,10 @@ private fun MetroSliderRow(
 
 @Composable
 private fun StatTile(title: String, icon: ImageVector, modifier: Modifier) {
+    val colors = foxyPalette()
     Column(modifier = modifier) {
-        Box(modifier = Modifier.fillMaxWidth().height(142.dp).clip(RoundedCornerShape(4.dp)).background(MetroSurfaceHigh), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = MetroMuted, modifier = Modifier.size(54.dp))
+        Box(modifier = Modifier.fillMaxWidth().height(142.dp).clip(RoundedCornerShape(4.dp)).background(color = colors.surfaceHigh), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = colors.muted, modifier = Modifier.size(54.dp))
         }
         Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 10.dp))
     }
@@ -323,11 +329,12 @@ private fun StatTile(title: String, icon: ImageVector, modifier: Modifier) {
 
 @Composable
 private fun StatSongCard(song: Song) {
+    val colors = foxyPalette()
     Column(modifier = Modifier.fillMaxWidth().size(width = 180.dp, height = 170.dp)) {
-        Box(modifier = Modifier.fillMaxWidth().height(92.dp).clip(RoundedCornerShape(4.dp)).background(MetroSurfaceHigh), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxWidth().height(92.dp).clip(RoundedCornerShape(4.dp)).background(color = colors.surfaceHigh), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White)
         }
         Text(song.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text("1 time - 43:46", color = MetroMuted, fontSize = 13.sp)
+        Text("1 time - 43:46", color = colors.muted, fontSize = 13.sp)
     }
 }

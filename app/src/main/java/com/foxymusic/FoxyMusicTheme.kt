@@ -6,6 +6,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -26,9 +28,10 @@ data class FoxyColors(
     val textSecondary: Color = Color(0xFFB0B0B0)
 )
 
-val FoxyAccent = Color(0xFFFF2D95)
-val FoxyMint = Color(0xFF00E5B8)
-val FoxySurface = Color(0xFF0A0A0A)
+/** Default accent — YouTube Music–style red. */
+val FoxyAccent = Color(0xFFFF1744)
+val FoxyMint = Color(0xFF69F0AE)
+val FoxySurface = Color(0xFF121212)
 val FoxySurfaceSoft = Color(0xFF1A1A1A)
 val FoxyPill = Color(0xFF242424)
 val FoxyMuted = Color(0xFF8A8A8A)
@@ -100,6 +103,14 @@ fun FoxyMusicTheme(
 
 @Composable
 fun foxyColors(): FoxyColors = LocalFoxyColors.current
+
+@Composable
+fun foxyPalette(): FoxyPalette {
+    val customization by FoxySettings.state.collectAsState()
+    val dynamicAccent by FoxyDynamicTheme.accent.collectAsState()
+    val systemDark = isSystemInDarkTheme()
+    return customization.palette(dynamicAccent, systemDark)
+}
 
 // Direct color access (for convenience)
 val FoxyAccentColor: Color
