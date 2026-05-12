@@ -9,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -26,49 +25,33 @@ fun SongActionMenu(
     val context = LocalContext.current
     val colors = foxyPalette()
 
-    // Fixed collectAsState
-    val libraryState by FoxyLibraryStore.state.collectAsState()
-    val isDownloaded = libraryState.isDownloaded(song)
+    val library by FoxyLibraryStore.state.collectAsState()
+    val isDownloaded = library.isDownloaded(song)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = colors.surface,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp)
-        ) {
-            // Song Info Header
+        Column(modifier = Modifier.fillMaxWidth()) {
+
+            // Header
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
+                modifier = Modifier.padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TrackArtwork(song = song, modifier = Modifier.size(64.dp))
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        text = song.title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = song.artist,
-                        fontSize = 14.sp,
-                        color = colors.muted
-                    )
+                    Text(song.title, fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 17.sp)
+                    Text(song.artist, color = colors.muted, fontSize = 14.sp)
                 }
             }
 
-            HorizontalDivider(color = colors.muted.copy(alpha = 0.2f))
+            Divider(color = colors.muted.copy(alpha = 0.2f), thickness = 1.dp)
 
             Spacer(Modifier.height(8.dp))
 
-            // Actions
             ActionItem(Icons.Rounded.PlayArrow, "Play") {
                 MusicPlayer.play(context, song)
                 onDismiss()
@@ -85,8 +68,8 @@ fun SongActionMenu(
             }
 
             ActionItem(
-                icon = if (isDownloaded) Icons.Rounded.Delete else Icons.Rounded.Download,
-                title = if (isDownloaded) "Remove Download" else "Download"
+                if (isDownloaded) Icons.Rounded.Delete else Icons.Rounded.Download,
+                if (isDownloaded) "Remove Download" else "Download"
             ) {
                 if (isDownloaded) {
                     FoxyLibraryStore.removeDownload(song, context)
@@ -119,10 +102,6 @@ private fun ActionItem(
     ) {
         Icon(icon, null, tint = colors.accent, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(20.dp))
-        Text(
-            text = title,
-            fontSize = 17.sp,
-            color = Color.White
-        )
+        Text(title, color = Color.White, fontSize = 17.sp)
     }
 }
