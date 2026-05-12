@@ -2,17 +2,7 @@ package com.foxymusic
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -21,30 +11,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.TrendingUp
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,13 +32,14 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun SearchScreen() {
-    val colors = foxyPalette()
+    val colors = foxyColors()                    // Updated to match new theme
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Song>>(emptyList()) }
     var keywordSections by remember { mutableStateOf<List<RecommendationSection>>(emptyList()) }
     var menuSong by remember { mutableStateOf<Song?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var loadingVideoId by remember { mutableStateOf<String?>(null) }
+
     val playerState by MusicPlayer.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -123,7 +93,11 @@ fun SearchScreen() {
         loadingVideoId = song.videoId
         scope.launch {
             withContext(Dispatchers.IO) {
-                MusicPlayer.playQueue(context, results.ifEmpty { listOf(song) }, results.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0))
+                MusicPlayer.playQueue(
+                    context,
+                    results.ifEmpty { listOf(song) },
+                    results.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
+                )
             }
             loadingVideoId = null
         }
@@ -134,8 +108,7 @@ fun SearchScreen() {
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(colors.surfaceHigh, colors.background),
-                    endY = 650f
+                    listOf(colors.surface, colors.surfaceSoft)
                 )
             )
     ) {
@@ -151,20 +124,21 @@ fun SearchScreen() {
                 onSearch = { runSearch() }
             )
             Spacer(modifier = Modifier.height(10.dp))
+
             if (results.isNotEmpty()) SearchTypeTabs()
+
             Spacer(modifier = Modifier.height(10.dp))
 
             when {
                 isLoading -> LoadingSearch()
-                results.isEmpty() -> if (keywordSections.isNotEmpty()) {
+                results.isEmpty() && keywordSections.isNotEmpty() -> {
                     LazyColumn(modifier = Modifier.weight(1f)) {
                         items(keywordSections, key = { it.title }) { section ->
                             KeywordRail(section = section, onSongClick = { playSong(it) })
                         }
                     }
-                } else {
-                    EmptySearch()
                 }
+                results.isEmpty() -> EmptySearch()
                 else -> LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -182,7 +156,6 @@ fun SearchScreen() {
                             onClick = { playSong(song) },
                             onMore = { menuSong = song }
                         )
-                        Divider(color = Color.White.copy(alpha = 0.05f), thickness = 0.5.dp)
                     }
                     items(keywordSections, key = { it.title }) { section ->
                         KeywordRail(section = section, onSongClick = { playSong(it) })
@@ -190,7 +163,7 @@ fun SearchScreen() {
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(70.dp))
         }
 
         SnackbarHost(
@@ -208,15 +181,17 @@ fun SearchScreen() {
 
 @Composable
 private fun SearchTypeTabs() {
-    val tabs = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists", "Featured playlists", "Podcasts", "Episodes")
+    val tabs = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists")
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(tabs) { tab -> MetroChip(tab, selected = tab == "All") }
+        items(tabs) { tab ->
+            MetroChip(tab, selected = tab == "All")
+        }
     }
 }
 
 @Composable
 private fun KeywordRail(section: RecommendationSection, onSongClick: (Song) -> Unit) {
-    val colors = foxyPalette()
+    val colors = foxyColors()
     Column(modifier = Modifier.padding(top = 14.dp)) {
         Text(section.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
         Spacer(modifier = Modifier.height(6.dp))
@@ -244,62 +219,29 @@ private fun KeywordRail(section: RecommendationSection, onSongClick: (Song) -> U
 }
 
 @Composable
-private fun SuggestionChip(
-    suggestion: SearchSuggestion,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(FoxySurface)
-            .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Rounded.Search, contentDescription = null, tint = FoxyAccent, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(suggestion.label, color = Color.White, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun VoiceSearchChip() {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(FoxyAccent.copy(alpha = 0.16f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Rounded.Mic, contentDescription = null, tint = FoxyAccent, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Voice", color = FoxyAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
 private fun SearchField(
     query: String,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit
 ) {
+    val colors = foxyColors()
     TextField(
         value = query,
         onValueChange = onQueryChange,
         leadingIcon = {
-            Icon(Icons.Rounded.Search, contentDescription = null, tint = FoxyMuted)
+            Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.muted)
         },
-        placeholder = { Text("Songs, artists, albums...", color = FoxyMuted) },
+        placeholder = { Text("Songs, artists, albums...", color = colors.muted) },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = FoxySurface,
-            unfocusedContainerColor = FoxySurface,
+            focusedContainerColor = colors.surface,
+            unfocusedContainerColor = colors.surface,
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
-            cursorColor = FoxyAccent,
+            cursorColor = colors.accent,
         ),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
@@ -309,18 +251,20 @@ private fun SearchField(
 
 @Composable
 private fun LoadingSearch() {
+    val colors = foxyColors()
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(180.dp),
         contentAlignment = Alignment.Center
     ) {
-        CircularProgressIndicator(color = FoxyAccent)
+        CircularProgressIndicator(color = colors.accent)
     }
 }
 
 @Composable
 private fun EmptySearch() {
+    val colors = foxyColors()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -331,14 +275,14 @@ private fun EmptySearch() {
             modifier = Modifier
                 .size(72.dp)
                 .clip(CircleShape)
-                .background(FoxySurfaceSoft),
+                .background(colors.surfaceSoft),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = FoxyAccent, modifier = Modifier.size(34.dp))
+            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(34.dp))
         }
         Spacer(modifier = Modifier.height(14.dp))
         Text("Your next repeat is waiting", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text("Search for a track, artist, or album.", color = FoxyMuted, fontSize = 14.sp)
+        Text("Search for a track, artist, or album.", color = colors.muted, fontSize = 14.sp)
     }
 }
 
@@ -351,16 +295,17 @@ fun SongItem(
     onClick: () -> Unit,
     onMore: () -> Unit = {}
 ) {
+    val colors = foxyColors()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
-            .background(if (isCurrent) FoxyAccent.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (isCurrent) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TrackArtwork(song = song, modifier = Modifier.size(54.dp), cornerRadius = 12)
+        TrackArtwork(song = song, modifier = Modifier.size(54.dp))   // Removed cornerRadius
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -373,7 +318,7 @@ fun SongItem(
             )
             Text(
                 text = song.artist,
-                color = FoxyMuted,
+                color = colors.muted,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -381,10 +326,10 @@ fun SongItem(
         }
         Spacer(modifier = Modifier.width(10.dp))
         when {
-            isLoading -> CircularProgressIndicator(color = FoxyAccent, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
-            isPlaying -> Icon(Icons.Rounded.GraphicEq, contentDescription = "Playing", tint = FoxyMint, modifier = Modifier.size(24.dp))
+            isLoading -> CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+            isPlaying -> Icon(Icons.Rounded.GraphicEq, contentDescription = "Playing", tint = colors.mint, modifier = Modifier.size(24.dp))
             else -> IconButton(onClick = onMore) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "Song menu", tint = FoxyMuted, modifier = Modifier.size(24.dp))
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Song menu", tint = colors.muted, modifier = Modifier.size(24.dp))
             }
         }
     }

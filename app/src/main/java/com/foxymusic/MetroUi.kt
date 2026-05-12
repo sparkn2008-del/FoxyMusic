@@ -3,17 +3,7 @@ package com.foxymusic
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -31,7 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 
+// Metro / Foxy Color Palette
 val MetroBlack = Color(0xFF000000)
 val MetroSurface = Color(0xFF111313)
 val MetroSurfaceHigh = Color(0xFF1A2020)
@@ -45,6 +37,31 @@ fun foxyPalette(): FoxyPalette {
     val settings by FoxySettings.state.collectAsState()
     val songAccent by FoxyDynamicTheme.accent.collectAsState()
     return settings.palette(songAccent, isSystemInDarkTheme())
+}
+
+// ==================== UI Components ====================
+
+@Composable
+fun TrackArtwork(
+    song: Song?,                    // Made nullable to prevent crashes
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
+) {
+    val colors = foxyPalette()
+    
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .background(colors.pill),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = song?.thumbnail ?: "",
+            contentDescription = song?.title,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 @Composable
@@ -86,7 +103,12 @@ fun MetroSectionTitle(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = colors.accent, fontSize = 27.sp, fontWeight = FontWeight.ExtraBold)
+        Text(
+            text = title,
+            color = colors.accent,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
         if (action != null) {
             Text(
                 text = action,
@@ -95,11 +117,52 @@ fun MetroSectionTitle(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(Color.Transparent)
                     .clickable { onAction() }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }
+    }
+}
+
+@Composable
+fun MetroSongRow(
+    song: Song,                     // Kept non-nullable as before
+    modifier: Modifier = Modifier,
+    trailing: @Composable () -> Unit = {},
+    onClick: () -> Unit = {}
+) {
+    val colors = foxyPalette()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackArtwork(
+            song = song,
+            modifier = Modifier.size(58.dp)
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = song.artist,
+                color = colors.muted,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        trailing()
     }
 }
 
@@ -129,13 +192,30 @@ fun MetroIconTile(
                 .background(colors.pill),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint ?: colors.accent, modifier = Modifier.size(25.dp))
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = iconTint ?: colors.accent,
+                modifier = Modifier.size(25.dp)
+            )
         }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
             if (subtitle != null) {
-                Text(subtitle, color = colors.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = subtitle,
+                    color = colors.muted,
+                    fontSize = 13.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -171,7 +251,9 @@ fun MetroToggleRow(
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-            if (subtitle != null) Text(subtitle, color = colors.muted, fontSize = 13.sp, maxLines = 2)
+            if (subtitle != null) {
+                Text(subtitle, color = colors.muted, fontSize = 13.sp, maxLines = 2)
+            }
         }
         Switch(
             checked = checked,
@@ -183,32 +265,6 @@ fun MetroToggleRow(
                 uncheckedTrackColor = colors.pill
             )
         )
-    }
-}
-
-@Composable
-fun MetroSongRow(
-    song: Song,
-    modifier: Modifier = Modifier,
-    trailing: @Composable () -> Unit = {},
-    onClick: () -> Unit = {}
-) {
-    val colors = foxyPalette()
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        TrackArtwork(song = song, modifier = Modifier.size(58.dp), cornerRadius = 8)
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(song.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, color = colors.muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        trailing()
     }
 }
 
@@ -228,5 +284,10 @@ fun MetroPageHeader(
 
 @Composable
 fun MetroDivider() {
-    Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(Color.White.copy(alpha = 0.06f)))
+    Spacer(
+        modifier = Modifier
+            .height(1.dp)
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.06f))
+    )
 }

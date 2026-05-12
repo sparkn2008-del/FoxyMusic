@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'   // Added for better Compose support
 }
 
 android {
@@ -32,46 +33,51 @@ android {
 
     buildFeatures {
         compose true
-        viewBinding false
-        dataBinding false
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.3'
+        kotlinCompilerExtensionVersion '1.6.10'   // Updated
     }
 }
 
 dependencies {
-    implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
 
-    // Compose
-    implementation platform('androidx.compose:compose-bom:2023.10.01')
+    // Compose BOM (Updated)
+    implementation platform('androidx.compose:compose-bom:2024.10.00')
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material'
     implementation 'androidx.compose.material:material-icons-extended'
-    implementation 'androidx.activity:activity-compose:1.8.1'
-    implementation 'androidx.navigation:navigation-compose:2.7.6'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
 
-    // Image loading
-    implementation 'io.coil-kt:coil-compose:2.5.0'
+    // Activity & Navigation
+    implementation 'androidx.activity:activity-compose:1.9.3'
+    implementation 'androidx.navigation:navigation-compose:2.8.2'
+
+    // Lifecycle (Important for collectAsStateWithLifecycle)
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.6'
+
+    // Image Loading
+    implementation 'io.coil-kt:coil-compose:2.6.0'
 
     // Media
-    implementation 'androidx.media3:media3-exoplayer:1.2.0'
-    implementation 'androidx.media3:media3-exoplayer-hls:1.2.0'
-    implementation 'androidx.media3:media3-ui:1.2.0'
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+
+    // Extractor
     implementation('com.github.MetrolistGroup:MetrolistExtractor:6305155') {
         exclude group: 'com.google.protobuf'
     }
 
-    // Network
+    // Network & Utils
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.json:json:20231013'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
 }

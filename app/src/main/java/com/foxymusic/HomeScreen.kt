@@ -4,18 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -27,29 +16,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Album
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Movie
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Podcasts
-import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,9 +52,10 @@ private data class HomeFeed(
 fun HomeScreen(onPlayAll: () -> Unit = {}) {
     val playerState by MusicPlayer.state.collectAsState()
     val account by FoxyAccount.state.collectAsState()
-    val colors = foxyPalette()
+    val colors = foxyColors()                    // Changed to foxyColors()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
     var feed by remember { mutableStateOf(HomeFeed()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -91,7 +64,11 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
 
     fun playSong(song: Song, queue: List<Song>) {
         scope.launch(Dispatchers.IO) {
-            MusicPlayer.playQueue(context, queue.ifEmpty { listOf(song) }, queue.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0))
+            MusicPlayer.playQueue(
+                context,
+                queue.ifEmpty { listOf(song) },
+                queue.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
+            )
         }
     }
 
@@ -104,13 +81,15 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
                     val home = async { YTMusicApi.homeRecommendations() }
                     val songs = async { YTMusicApi.search("new music songs").take(20) }
                     val videos = async { YTMusicApi.videos("trending music videos").take(16) }
-                    val podcasts = async { YTMusicApi.search("music podcasts", null).take(12) }
-                    val playlists = async { YTMusicApi.search("workout focus chill playlists", null).take(12) }
+                    val podcasts = async { YTMusicApi.search("music podcasts").take(12) }
+                    val playlists = async { YTMusicApi.search("workout focus chill playlists").take(12) }
+
                     val discovery = listOf(
                         RecommendationSection("Charts and trending", YTMusicApi.search("top songs today").take(10)),
                         RecommendationSection("New releases", YTMusicApi.search("new release music").take(10)),
                         RecommendationSection("Late night radio", YTMusicApi.getMoodMix("Late Night").take(10))
                     ).filter { it.songs.isNotEmpty() }
+
                     HomeFeed(
                         homeSections = home.await(),
                         songs = songs.await(),
@@ -142,7 +121,7 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color.Black, Color(0xFF090C0B), colors.background)))
+                .background(Brush.verticalGradient(listOf(Color.Black, Color(0xFF090C0B), colors.surface)))
                 .pullRefresh(pullRefreshState),
             verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
@@ -154,7 +133,13 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
                 }
             }
 
-            item { MoodStrip { mood -> scope.launch { YTMusicApi.getMoodMix(mood).also { if (it.isNotEmpty()) MusicPlayer.playQueue(context, it, 0) } } } }
+            item { MoodStrip { mood -> 
+                scope.launch { 
+                    YTMusicApi.getMoodMix(mood).also { 
+                        if (it.isNotEmpty()) MusicPlayer.playQueue(context, it, 0) 
+                    } 
+                } 
+            } }
 
             item {
                 HomeSpotlight(
@@ -192,7 +177,7 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
                     onCharts = { scope.launch { YTMusicApi.search("top songs today").also { MusicPlayer.playQueue(context, it, 0) } } },
                     onMood = { scope.launch { YTMusicApi.getMoodMix("Focus").also { MusicPlayer.playQueue(context, it, 0) } } },
                     onNew = { scope.launch { YTMusicApi.search("new release music").also { MusicPlayer.playQueue(context, it, 0) } } },
-                    onPlaylists = { scope.launch { YTMusicApi.search("best music playlists", null).also { MusicPlayer.playQueue(context, it, 0) } } }
+                    onPlaylists = { scope.launch { YTMusicApi.search("best music playlists").also { MusicPlayer.playQueue(context, it, 0) } } }
                 )
             }
 
@@ -220,6 +205,8 @@ fun HomeScreen(onPlayAll: () -> Unit = {}) {
     menuSong?.let { SongActionMenu(song = it, onDismiss = { menuSong = null }) }
 }
 
+// ==================== Helper Composables ====================
+
 @Composable
 private fun MoodStrip(onMood: (String) -> Unit) {
     Row(
@@ -233,30 +220,61 @@ private fun MoodStrip(onMood: (String) -> Unit) {
 }
 
 @Composable
-private fun HomeSpotlight(song: Song?, loading: Boolean, error: String?, onPlay: () -> Unit, onRadio: () -> Unit) {
-    val colors = foxyPalette()
+private fun HomeSpotlight(
+    song: Song?,
+    loading: Boolean,
+    error: String?,
+    onPlay: () -> Unit,
+    onRadio: () -> Unit
+) {
+    val colors = foxyColors()
     Box(
-        modifier = Modifier.padding(horizontal = 18.dp).fillMaxWidth().height(178.dp).clip(RoundedCornerShape(10.dp))
+        modifier = Modifier
+            .padding(horizontal = 18.dp)
+            .fillMaxWidth()
+            .height(178.dp)
+            .clip(RoundedCornerShape(10.dp))
     ) {
-        TrackArtwork(song, Modifier.fillMaxSize(), 10)
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.88f), colors.accent.copy(alpha = 0.36f), Color.Transparent))))
+        TrackArtwork(song = song, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier.fillMaxSize()
+                .background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.88f), colors.accent.copy(alpha = 0.36f), Color.Transparent)))
+        )
         Row(Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Start listening", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                Text(song?.title ?: if (loading) "Loading your feed" else "A station is ready", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(error ?: song?.artist ?: "Refresh or search to tune the feed", color = colors.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    song?.title ?: if (loading) "Loading your feed" else "A station is ready",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    error ?: song?.artist ?: "Refresh or search to tune the feed",
+                    color = colors.muted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     RoundAction(Icons.Rounded.PlayArrow, "Play", onPlay)
                     RoundAction(Icons.Rounded.Radio, "Radio", onRadio)
                 }
             }
-            TrackArtwork(song, Modifier.size(118.dp), 8)
+            TrackArtwork(song = song, modifier = Modifier.size(118.dp))
         }
     }
 }
 
 @Composable
-private fun DiscoveryGrid(onCharts: () -> Unit, onMood: () -> Unit, onNew: () -> Unit, onPlaylists: () -> Unit) {
+private fun DiscoveryGrid(
+    onCharts: () -> Unit,
+    onMood: () -> Unit,
+    onNew: () -> Unit,
+    onPlaylists: () -> Unit
+) {
     val cards = listOf(
         Triple("Charts", Icons.Rounded.AutoAwesome, onCharts),
         Triple("Mood radio", Icons.Rounded.Radio, onMood),
@@ -275,14 +293,24 @@ private fun DiscoveryGrid(onCharts: () -> Unit, onMood: () -> Unit, onNew: () ->
     }
 }
 
+// (Rest of the helper functions remain mostly the same but with foxyColors() and fixed TrackArtwork)
+
 @Composable
 private fun ExploreTile(title: String, icon: ImageVector, color: Color, onClick: () -> Unit, modifier: Modifier) {
-    val colors = foxyPalette()
+    val colors = foxyColors()
     Row(
-        modifier = modifier.height(86.dp).clip(RoundedCornerShape(8.dp)).background(color).clickable { onClick() }.padding(14.dp),
+        modifier = modifier
+            .height(86.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(color)
+            .clickable { onClick() }
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(42.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.24f)), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(42.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.24f)),
+            contentAlignment = Alignment.Center
+        ) {
             Icon(icon, contentDescription = null, tint = colors.accent)
         }
         Text(title, color = Color.White, fontWeight = FontWeight.Black, fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp))
@@ -294,7 +322,7 @@ private fun TypeRail(title: String, icon: ImageVector, songs: List<Song>, onSong
     if (songs.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = foxyPalette().accent, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = null, tint = foxyColors().accent, modifier = Modifier.size(22.dp))
             Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 8.dp))
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -309,10 +337,10 @@ private fun TypeRail(title: String, icon: ImageVector, songs: List<Song>, onSong
 
 @Composable
 private fun PosterCard(song: Song, onClick: () -> Unit, onMore: () -> Unit) {
-    val colors = foxyPalette()
+    val colors = foxyColors()
     Box(Modifier.width(148.dp).clickable { onClick() }) {
         Column {
-            TrackArtwork(song, Modifier.fillMaxWidth().aspectRatio(1f), 8)
+            TrackArtwork(song = song, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
             Text(song.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             Text(song.artist, color = colors.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -323,13 +351,24 @@ private fun PosterCard(song: Song, onClick: () -> Unit, onMore: () -> Unit) {
 }
 
 @Composable
-private fun CompactHomeSong(song: Song, isCurrent: Boolean, isPlaying: Boolean, onClick: () -> Unit, onMore: () -> Unit) {
-    val colors = foxyPalette()
+private fun CompactHomeSong(
+    song: Song,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    onMore: () -> Unit
+) {
+    val colors = foxyColors()
     Row(
-        modifier = Modifier.width(320.dp).clip(RoundedCornerShape(6.dp)).background(if (isCurrent) colors.accent.copy(alpha = 0.16f) else Color.Transparent).clickable { onClick() }.padding(horizontal = 10.dp, vertical = 6.dp),
+        modifier = Modifier
+            .width(320.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isCurrent) colors.accent.copy(alpha = 0.16f) else Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TrackArtwork(song, Modifier.size(54.dp), 4)
+        TrackArtwork(song = song, modifier = Modifier.size(54.dp))
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
             Text(song.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(song.artist, color = colors.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -346,14 +385,18 @@ private fun SectionHeader(title: String, action: String? = null, onAction: () ->
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
         action?.let {
-            Text(it, color = foxyPalette().accent, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAction() }.padding(8.dp))
+            Text(it, color = foxyColors().accent, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { onAction() }.padding(8.dp))
         }
     }
 }
 
 @Composable
 private fun RoundAction(icon: ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.15f))) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.15f))
+    ) {
         Icon(icon, contentDescription = label, tint = Color.White)
     }
 }
