@@ -13,7 +13,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// ==================== Foxy Color System ====================
+// ====================== Foxy Color System ======================
 
 data class FoxyColors(
     val accent: Color,
@@ -26,28 +26,39 @@ data class FoxyColors(
     val textSecondary: Color = Color(0xFFB0B0B0)
 )
 
-val FoxyAccent = Color(0xFFFF4D94)
+val FoxyAccent = Color(0xFFFF2D95)
 val FoxyMint = Color(0xFF00E5B8)
-val FoxySurface = Color(0xFF0F0F0F)
+val FoxySurface = Color(0xFF0A0A0A)
 val FoxySurfaceSoft = Color(0xFF1A1A1A)
-val FoxyPill = Color(0xFF252525)
-val FoxyMuted = Color(0xFF888888)
+val FoxyPill = Color(0xFF242424)
+val FoxyMuted = Color(0xFF8A8A8A)
 
 val LocalFoxyColors = staticCompositionLocalOf<FoxyColors> {
-    error("No FoxyColors provided")
+    error("FoxyColors not provided! Wrap your UI with FoxyMusicTheme")
 }
 
 val FoxyTypography = Typography(
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 28.sp,
+        lineHeight = 34.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp
+    ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp
     ),
-    titleLarge = TextStyle(
+    bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Bold,
-        fontSize = 22.sp
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp
     )
 )
 
@@ -73,6 +84,7 @@ fun FoxyMusicTheme(
         surfaceVariant = FoxySurfaceSoft,
         onBackground = Color.White,
         onSurface = Color.White,
+        onPrimary = Color.Black,
     )
 
     CompositionLocalProvider(LocalFoxyColors provides colors) {
@@ -84,6 +96,17 @@ fun FoxyMusicTheme(
     }
 }
 
-// Helper functions
+// ==================== Easy Access ====================
+
 @Composable
 fun foxyColors(): FoxyColors = LocalFoxyColors.current
+
+// Direct color access (for convenience)
+val FoxyAccentColor: Color
+    @Composable get() = foxyColors().accent
+
+val FoxyMintColor: Color
+    @Composable get() = foxyColors().mint
+
+val FoxyMutedColor: Color
+    @Composable get() = foxyColors().muted
