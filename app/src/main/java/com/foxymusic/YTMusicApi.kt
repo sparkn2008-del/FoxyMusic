@@ -17,15 +17,6 @@ data class RecommendationSection(
     val songs: List<Song>
 )
 
-data class Song(
-    val videoId: String = "",
-    val title: String = "",
-    val artist: String = "",
-    val thumbnail: String = "",
-    val streamUrl: String? = null,      // For downloading
-    val localPath: String? = null       // For offline play
-)
-
 data class AccountInfo(
     val name: String,
     val email: String,
@@ -33,6 +24,7 @@ data class AccountInfo(
 )
 
 object YTMusicApi {
+
     private const val apiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
     private const val baseUrl = "https://music.youtube.com/youtubei/v1"
 
@@ -46,13 +38,15 @@ object YTMusicApi {
         .add("Content-Type", "application/json")
         .add("Origin", "https://music.youtube.com")
         .add("Referer", "https://music.youtube.com/")
-        .add("User-Agent", "Mozilla/5.0")
+        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         .add("X-YouTube-Client-Name", "67")
         .add("X-YouTube-Client-Version", "1.20250401.01.00")
         .build()
 
     private const val filterSongs = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
     private const val filterVideos = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"
+
+    // ====================== PUBLIC API ======================
 
     suspend fun homeRecommendations(): List<RecommendationSection> {
         val json = post("browse", JSONObject().apply {
@@ -65,13 +59,16 @@ object YTMusicApi {
 
     suspend fun search(query: String, filter: String? = filterSongs): List<Song> {
         if (query.isBlank()) return emptyList()
+
         val json = post("search", JSONObject().apply {
             put("context", clientContext())
             put("query", query)
             filter?.takeIf { it.isNotBlank() }?.let { put("params", it) }
         }) ?: return emptyList()
 
-        return parseSongs(json).distinctBy { it.videoId }.take(60)
+        return parseSongs(json)
+            .distinctBy { it.videoId }
+            .take(60)
     }
 
     suspend fun getMoodMix(mood: String): List<Song> {
@@ -91,7 +88,8 @@ object YTMusicApi {
     suspend fun radio(seed: Song): List<Song> {
         val nextSongs = next(seed.videoId).filterNot { it.videoId == seed.videoId }
         if (nextSongs.isNotEmpty()) return nextSongs.take(50)
-        return search("${seed.title} ${seed.artist} radio", null)
+
+        return search("${seed.title} ${seed.artist} radio")
             .filterNot { it.videoId == seed.videoId }
             .take(50)
     }
@@ -115,8 +113,10 @@ object YTMusicApi {
                 .headers(headers)
                 .get()
                 .build()
+
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
+
                 response.body?.string()
                     ?.replace(Regex("<[^>]+>"), "\n")
                     ?.replace("&amp;", "&")
@@ -139,9 +139,12 @@ object YTMusicApi {
         avatarUrl = FoxyAccount.state.value.avatarUrl
     )
 
+    // ====================== PRIVATE HELPERS ======================
+
     private suspend fun post(endpoint: String, payload: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
             val body = payload.toString().toRequestBody("application/json".toMediaType())
+
             val request = Request.Builder()
                 .url("$baseUrl/$endpoint?key=$apiKey&prettyPrint=false")
                 .headers(headers)
@@ -155,12 +158,14 @@ object YTMusicApi {
         }.getOrNull()
     }
 
-    private fun clientContext(): JSONObject = JSONObject()
-        .put("client", JSONObject()
-            .put("clientName", "WEB_REMIX")
-            .put("clientVersion", "1.20250401.01.00")
-            .put("hl", "en")
-            .put("gl", "US"))
+    private fun clientContext(): JSONObject = JSONObject().apply {
+        put("client", JSONObject().apply {
+            put("clientName", "WEB_REMIX")
+            put("clientVersion", "1.20250401.01.00")
+            put("hl", "en")
+            put("gl", "US")
+        })
+    }
 
     private fun parseSections(root: JSONObject): List<RecommendationSection> {
         val sections = mutableListOf<RecommendationSection>()
@@ -171,7 +176,10 @@ object YTMusicApi {
 
             val title = renderer.titleText().ifBlank { "Recommended" }
             val songs = parseSongs(renderer)
-            if (songs.isNotEmpty()) sections += RecommendationSection(title, songs)
+
+            if (songs.isNotEmpty()) {
+                sections += RecommendationSection(title, songs)
+            }
         }
         return sections.distinctBy { it.title }.take(12)
     }
@@ -188,10 +196,11 @@ object YTMusicApi {
             if (videoId.isBlank()) return@walkObjects
 
             val runs = renderer.findTextRuns()
-            val title = runs.firstOrNull { it.isNotBlank() } ?: "Unknown title"
-            val artist = runs.drop(1)
-                .firstOrNull { it.isNotBlank() && it != title && it != "Song" && it != "Video" }
-                ?: "YouTube Music"
+            val title = runs.firstOrNull { it.isNotBlank() } ?: "Unknown Title"
+            val artist = runs.drop(1).firstOrNull { 
+                it.isNotBlank() && it != title && it != "Song" && it != "Video"
+            } ?: "YouTube Music"
+
             val thumbnail = renderer.findThumbnail()
             val playlistId = renderer.findPlaylistId()
 
@@ -200,6 +209,7 @@ object YTMusicApi {
                 title = title,
                 artist = artist,
                 thumbnail = thumbnail,
+                album = null,           // Can be improved later
                 playlistId = playlistId
             )
         }
@@ -217,7 +227,9 @@ object YTMusicApi {
         )
     )
 
-    private fun JSONObject.titleText(): String =
+    // ====================== JSON EXTENSIONS ======================
+
+    private fun JSONObject.titleText(): String = /* ... same as before ... */
         optJSONObject("header")
             ?.optJSONObject("musicCarouselShelfBasicHeaderRenderer")
             ?.optJSONObject("title")
@@ -252,8 +264,7 @@ object YTMusicApi {
         walkObjects(this) { obj ->
             if (url.isBlank()) {
                 val thumbnails = obj.optJSONArray("thumbnails")
-                val last = thumbnails?.optJSONObject(thumbnails.length() - 1)
-                url = last?.optString("url").orEmpty()
+                url = thumbnails?.optJSONObject(thumbnails.length() - 1)?.optString("url").orEmpty()
             }
         }
         return url
@@ -273,25 +284,28 @@ object YTMusicApi {
         return runs
     }
 
-    private fun JSONObject.runsText(): String = optJSONArray("runs")
-        ?.let { array ->
+    private fun JSONObject.runsText(): String =
+        optJSONArray("runs")?.let { array ->
             buildList {
                 for (i in 0 until array.length()) {
                     array.optJSONObject(i)?.optString("text")?.let(::add)
                 }
             }.joinToString("")
-        }
-        .orEmpty()
+        }.orEmpty()
 
     private fun walkObjects(value: Any?, visit: (JSONObject) -> Unit) {
         when (value) {
             is JSONObject -> {
                 visit(value)
                 val keys = value.keys()
-                while (keys.hasNext()) walkObjects(value.opt(keys.next()), visit)
+                while (keys.hasNext()) {
+                    walkObjects(value.opt(keys.next()), visit)
+                }
             }
             is JSONArray -> {
-                for (i in 0 until value.length()) walkObjects(value.opt(i), visit)
+                for (i in 0 until value.length()) {
+                    walkObjects(value.opt(i), visit)
+                }
             }
         }
     }

@@ -1,201 +1,130 @@
 package com.foxymusic
 
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.net.Uri
-import android.os.Environment
-import androidx.core.content.ContextCompat
+import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 
 data class FoxyLibraryState(
-    val likedSongs: List<Song> = emptyList(),
-    val savedSongs: List<Song> = emptyList(),
+    val allSongs: List<Song> = emptyList(),
     val downloadedSongs: List<Song> = emptyList(),
-    val history: List<Song> = emptyList(),
-    val downloadProgress: Map<String, Float> = emptyMap()
+    val isLoading: Boolean = false
 ) {
-    fun isLiked(song: Song?): Boolean = song != null && likedSongs.any { it.videoId == song.videoId }
-    fun isSaved(song: Song?): Boolean = song != null && savedSongs.any { it.videoId == song.videoId }
-    fun isDownloaded(song: Song?): Boolean = song != null && downloadedSongs.any { it.videoId == song.videoId }
+    fun isDownloaded(song: Song?): Boolean {
+        if (song == null) return false
+        return downloadedSongs.any { it.videoId == song.videoId } || 
+               song.isDownloaded || 
+               !song.localPath.isNullOrBlank()
+    }
+
+    fun getSongById(videoId: String): Song? {
+        return allSongs.find { it.videoId == videoId } 
+            ?: downloadedSongs.find { it.videoId == videoId }
+    }
 }
 
 object FoxyLibraryStore {
-    private const val PREFS = "foxy_library"
-    private const val LIKED = "liked"
-    private const val SAVED = "saved"
-    private const val DOWNLOADED = "downloaded"
-    private const val HISTORY = "history"
 
-    private var context: Context? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val _state = MutableStateFlow(FoxyLibraryState())
-    val state: StateFlow<FoxyLibraryState> = _state
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun init(appContext: Context) {
-        context = appContext.applicationContext
-        val prefs = context!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val state = mutableStateOf(FoxyLibraryState())
 
-        _state.value = FoxyLibraryState(
-            likedSongs = prefs.getString(LIKED, "[]").orEmpty().toSongs(),
-            savedSongs = prefs.getString(SAVED, "[]").orEmpty().toSongs(),
-            downloadedSongs = prefs.getString(DOWNLOADED, "[]").orEmpty().toSongs(),
-            history = prefs.getString(HISTORY, "[]").orEmpty().toSongs()
-        )
+    // ====================== Public API ======================
 
-        // Register download complete receiver
-        ContextCompat.registerReceiver(
-            context!!,
-            object : BroadcastReceiver() {
-                override fun onReceive(ctx: Context?, intent: Intent?) {}
-            },
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-    }
-
-    // ====================== DOWNLOAD SYSTEM ======================
-
-    fun downloadSong(context: Context, song: Song) {
-        if (isDownloaded(song)) return
-
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-
-        val safeTitle = song.title.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val fileName = "$safeTitle.mp3"
-
-        val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "FoxyMusic")
-        if (!downloadsDir.exists()) downloadsDir.mkdirs()
-
-        val destinationFile = File(downloadsDir, fileName)
-
-        val uri = Uri.parse(song.streamUrl ?: return)
-
-        val request = DownloadManager.Request(uri)
-            .setTitle(song.title)
-            .setDescription("Downloading • ${song.artist}")
-            .setDestinationUri(Uri.fromFile(destinationFile))
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
-
-        downloadManager.enqueue(request)
-
-        // Show progress
-        _state.update { it.copy(downloadProgress = it.downloadProgress + (song.videoId to 0f)) }
-
-        // Fake smooth progress
+    fun init(context: Context) {
         scope.launch {
-            for (progress in 10..100 step 12) {
-                delay(160)
-                _state.update {
-                    it.copy(downloadProgress = it.downloadProgress + (song.videoId to progress / 100f))
-                }
-            }
-
-            val downloadedSong = song.copy(localPath = destinationFile.absolutePath)
-            val current = _state.value
-            val updatedDownloads = listOf(downloadedSong) + current.downloadedSongs.filterNot { it.videoId == song.videoId }
-
-            update(current.copy(
-                downloadedSongs = updatedDownloads,
-                downloadProgress = current.downloadProgress - song.videoId
-            ))
+            loadDownloadedSongs(context)
         }
     }
 
-    fun removeDownload(song: Song) {
-        song.localPath?.let { path ->
-            File(path).delete()
+    fun addSong(song: Song) {
+        val current = state.value
+        val updatedList = current.allSongs + song.copy(isDownloaded = false)
+
+        state.value = current.copy(
+            allSongs = updatedList.distinctBy { it.videoId }
+        )
+    }
+
+    fun markAsDownloaded(song: Song, localPath: String) {
+        val current = state.value
+
+        val updatedSong = song.copy(
+            localPath = localPath,
+            isDownloaded = true,
+            streamUrl = null
+        )
+
+        val newAllSongs = current.allSongs.map { 
+            if (it.videoId == song.videoId) updatedSong else it 
         }
-        val current = _state.value
-        val updated = current.downloadedSongs.filterNot { it.videoId == song.videoId }
-        update(current.copy(downloadedSongs = updated))
+
+        val newDownloaded = (current.downloadedSongs + updatedSong)
+            .distinctBy { it.videoId }
+
+        state.value = current.copy(
+            allSongs = newAllSongs,
+            downloadedSongs = newDownloaded
+        )
     }
 
-    // ====================== LIBRARY FUNCTIONS ======================
+    fun removeDownload(song: Song, context: Context) {
+        val current = state.value
+        val file = song.localPath?.let { File(it) }
 
-    fun toggleLike(song: Song) {
-        val current = _state.value
-        val newList = if (current.isLiked(song)) {
-            current.likedSongs.filterNot { it.videoId == song.videoId }
-        } else {
-            listOf(song) + current.likedSongs.filterNot { it.videoId == song.videoId }
+        file?.delete()
+
+        val updatedSong = song.copy(localPath = null, isDownloaded = false)
+
+        state.value = current.copy(
+            allSongs = current.allSongs.map { 
+                if (it.videoId == song.videoId) updatedSong else it 
+            },
+            downloadedSongs = current.downloadedSongs.filter { it.videoId != song.videoId }
+        )
+    }
+
+    fun isDownloaded(song: Song?): Boolean = state.value.isDownloaded(song)
+
+    // ====================== Private ======================
+
+    private suspend fun loadDownloadedSongs(context: Context) {
+        state.value = state.value.copy(isLoading = true)
+        delay(300) // small delay for smooth UX
+
+        val downloadsDir = File(context.getExternalFilesDir(null), "downloads")
+        if (!downloadsDir.exists()) {
+            state.value = state.value.copy(isLoading = false)
+            return
         }
-        update(current.copy(likedSongs = newList))
-    }
 
-    fun toggleSaved(song: Song) {
-        val current = _state.value
-        val newList = if (current.isSaved(song)) {
-            current.savedSongs.filterNot { it.videoId == song.videoId }
-        } else {
-            listOf(song) + current.savedSongs.filterNot { it.videoId == song.videoId }
-        }
-        update(current.copy(savedSongs = newList))
-    }
-
-    fun addHistory(song: Song) {
-        val current = _state.value
-        val newHistory = (listOf(song) + current.history.filterNot { it.videoId == song.videoId }).take(80)
-        update(current.copy(history = newHistory))
-    }
-
-    // ====================== PRIVATE HELPERS ======================
-
-    private fun update(next: FoxyLibraryState) {
-        _state.value = next
-        context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.apply {
-            putString(LIKED, next.likedSongs.toJson())
-            putString(SAVED, next.savedSongs.toJson())
-            putString(DOWNLOADED, next.downloadedSongs.toJson())
-            putString(HISTORY, next.history.toJson())
-            apply()
-        }
-    }
-
-    private fun String.toSongs(): List<Song> = runCatching {
-        val array = JSONArray(this)
-        buildList {
-            for (i in 0 until array.length()) {
-                val item = array.getJSONObject(i)
-                add(
-                    Song(
-                        videoId = item.optString("videoId"),
-                        title = item.optString("title"),
-                        artist = item.optString("artist"),
-                        thumbnail = item.optString("thumbnail"),
-                        localPath = item.optString("localPath").takeIf { it.isNotBlank() }
-                    )
+        val downloaded = downloadsDir.listFiles()?.mapNotNull { file ->
+            val videoId = file.nameWithoutExtension
+            if (file.length() > 0) {
+                Song(
+                    videoId = videoId,
+                    title = "Downloaded Song",
+                    artist = "Local",
+                    localPath = file.absolutePath,
+                    isDownloaded = true
                 )
-            }
-        }.filter { it.videoId.isNotBlank() }
-    }.getOrDefault(emptyList())
+            } else null
+        } ?: emptyList()
 
-    private fun List<Song>.toJson(): String {
-        val array = JSONArray()
-        forEach { song ->
-            array.put(
-                JSONObject().apply {
-                    put("videoId", song.videoId)
-                    put("title", song.title)
-                    put("artist", song.artist)
-                    put("thumbnail", song.thumbnail)
-                    if (!song.localPath.isNullOrBlank()) put("localPath", song.localPath)
-                }
-            )
-        }
-        return array.toString()
+        state.value = state.value.copy(
+            downloadedSongs = downloaded,
+            isLoading = false
+        )
+    }
+
+    // Helper to get local file path
+    fun getLocalPath(context: Context, videoId: String): String {
+        val dir = File(context.getExternalFilesDir(null), "downloads")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "$videoId.mp3").absolutePath
     }
 }
