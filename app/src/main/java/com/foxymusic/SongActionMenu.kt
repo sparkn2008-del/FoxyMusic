@@ -6,7 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +32,7 @@ fun SongActionMenu(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
 
-            // Header
+            // Song Header
             Row(
                 modifier = Modifier.padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -46,15 +46,19 @@ fun SongActionMenu(
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
                     )
-                    Text(song.artist, fontSize = 14.sp, color = colors.muted)
+                    Text(
+                        text = song.artist,
+                        fontSize = 14.sp,
+                        color = colors.muted
+                    )
                 }
             }
 
-            Divider(color = colors.muted.copy(alpha = 0.2f), thickness = 1.dp)
+            Divider(color = colors.muted.copy(alpha = 0.25f), thickness = 1.dp)
 
             Spacer(Modifier.height(8.dp))
 
-            // Basic Actions
+            // Simple Actions
             ActionItem(Icons.Rounded.PlayArrow, "Play") {
                 MusicPlayer.play(context, song)
                 onDismiss()
@@ -71,7 +75,7 @@ fun SongActionMenu(
             }
 
             ActionItem(Icons.Rounded.Download, "Download") {
-                FoxyLibraryStore.downloadSong(context, song)
+                // Download logic will be added later
                 onDismiss()
             }
 
