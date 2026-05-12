@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <color name="primary">#FFFF6B35</color>
+    <color name="primary_dark">#FFE84D0E</color>
+    <color name="accent">#FFFFA500</color>
+    <color name="background">#FF0A0A0A</color>
+    <color name="surface">#FF161616</color>
+    <color name="surface_variant">#FF1F1F1F</color>
+    <color name="mini_player_bg">#FF1A1A1A</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFB0B0B0</color>
+    <color name="text_accent">#FFFF6B35</color>
+    <color name="ripple">#33FF6B35</color>
+</resources>

@@ -1,0 +1,28 @@
+# Gradle and Android build output
+.gradle/
+build/
+**/build/
+**/.gradle/
+
+# Local machine config
+local.properties
+
+# IDE files
+.idea/
+*.iml
+
+# Generated APKs and bundles
+*.apk
+*.aab
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Local screenshots / scratch images
+adb-screen.png
+foxy-screen.png
+
+# Local reference/study copy
+.metrolist-study/
