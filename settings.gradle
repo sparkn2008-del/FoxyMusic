@@ -9,11 +9,13 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // Prefer a single repository definition from settings for the whole build.
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     
     repositories {
         maven { url = uri('https://maven.aliyun.com/repository/google') }
         maven { url = uri('https://maven.aliyun.com/repository/central') }
+        maven { url = uri('https://storage.googleapis.com/download.flutter.io') }
         google()
         mavenCentral()
         maven { url = uri('https://jitpack.io') }
@@ -22,3 +24,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "FoxyMusic"
 include ':app'
+
+def flutterModulePath = new File(settingsDir, "foxy_flutter_ui/.android/include_flutter.groovy")
+if (flutterModulePath.exists()) {
+    setBinding(new Binding([gradle: this]))
+    evaluate(flutterModulePath)
+}
