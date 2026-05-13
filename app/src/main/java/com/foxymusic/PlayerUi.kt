@@ -794,7 +794,6 @@ fun CoilImage(
 }
 
 @Composable
-@Composable
 private fun CoilImageWithFallback(
     url: String,
     modifier: Modifier = Modifier,
