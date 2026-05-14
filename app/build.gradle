@@ -7,24 +7,54 @@ plugins {
 android {
     namespace 'com.foxymusic'
     compileSdk 34
+    ndkVersion "28.2.13676358"
 
     defaultConfig {
         applicationId "com.foxymusic"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "vbeta 1.1"
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include "armeabi-v7a", "arm64-v8a", "x86_64"
+            universalApk false
+        }
     }
 
     buildTypes {
         release {
+            signingConfig signingConfigs.debug
             minifyEnabled false
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    packagingOptions {
+        jniLibs {
+            excludes += ["**/libVkLayer_khronos_validation.so"]
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            java {
+                exclude 'com/foxymusic/flutter_application_1/**'
+            }
+        }
     }
 
     kotlinOptions {
@@ -36,7 +66,48 @@ android {
     }
 }
 
+def abiVersionCodes = [
+    "armeabi-v7a": 1,
+    "arm64-v8a"  : 2,
+    "x86_64"     : 3
+]
+
+android.applicationVariants.all { variant ->
+    variant.outputs.each { output ->
+        def abi = output.getFilter(com.android.build.OutputFile.ABI)
+        if (abi != null) {
+            output.versionCodeOverride = variant.versionCode * 1000 + abiVersionCodes.get(abi, 0)
+        }
+    }
+}
+
+tasks.register("stripReleaseFlutterNativeLibs") {
+    dependsOn("stripReleaseDebugSymbols")
+
+    doLast {
+        def stripExe = file("${android.sdkDirectory}/ndk/${android.ndkVersion}/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe")
+        if (!stripExe.exists()) {
+            throw new GradleException("Missing Android NDK llvm-strip at ${stripExe}")
+        }
+
+        fileTree("${buildDir}/intermediates/stripped_native_libs/release/stripReleaseDebugSymbols/out/lib") {
+            include "**/libflutter.so"
+            include "**/libapp.so"
+        }.files.each { nativeLib ->
+            exec {
+                commandLine stripExe.absolutePath, "--strip-unneeded", nativeLib.absolutePath
+            }
+        }
+    }
+}
+
+tasks.matching { it.name == "packageRelease" }.configureEach {
+    dependsOn("stripReleaseFlutterNativeLibs")
+}
+
 dependencies {
+    implementation project(':flutter')
+
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
@@ -67,6 +138,9 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
     implementation 'androidx.media3:media3-session:1.4.1'
     implementation 'androidx.media3:media3-ui:1.4.1'
+    implementation 'androidx.media3:media3-datasource-okhttp:1.4.1'
+    implementation 'androidx.media3:media3-datasource:1.4.1'
+    implementation 'androidx.media3:media3-database:1.4.1'
 
     // Extractor
     implementation('com.github.MetrolistGroup:MetrolistExtractor:6305155') {
