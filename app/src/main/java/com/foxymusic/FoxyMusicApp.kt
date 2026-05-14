@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.PhoneIphone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -111,15 +113,15 @@ fun FoxyMusicApp() {
                     onProfile = { showAccountSheet = true },
                     account = account
                 )
-                "search" -> SimpTopBar(
+                "search" -> FoxyScreenTopBar(
                     title = "Search",
-                    subtitle = "YouTube Music catalog",
+                    subtitle = "Songs, videos, and moods",
                     showSearchAction = false,
                     onSearch = { },
                     onProfile = { showAccountSheet = true },
                     account = account
                 )
-                "library" -> SimpTopBar(
+                "library" -> FoxyScreenTopBar(
                     title = "Library",
                     subtitle = "Liked, saved, and offline",
                     showSearchAction = true,
@@ -127,7 +129,7 @@ fun FoxyMusicApp() {
                     onProfile = { showAccountSheet = true },
                     account = account
                 )
-                "profile" -> SimpTopBar(
+                "profile" -> FoxyScreenTopBar(
                     title = "Me",
                     subtitle = "Profile, discovery, and account",
                     showSearchAction = true,
@@ -141,12 +143,14 @@ fun FoxyMusicApp() {
             Column(
                 modifier = Modifier
                     .background(color = colors.background)
+                    .navigationBarsPadding()
                     .padding(bottom = 4.dp)
             ) {
                 PersistentMiniPlayer(
                     state = playerState,
                     onOpen = { showPlayerSheet = true }
                 )
+                Spacer(Modifier.height(8.dp))
                 Surface(
                     color = colors.surface.copy(alpha = 0.94f),
                     tonalElevation = 0.dp,
@@ -217,7 +221,6 @@ fun FoxyMusicApp() {
         ) {
             composable("home") {
                 HomeScreen(
-                    onPlayAll = { navController.navigatePrimary("search") },
                     onSongPlay = { showPlayerSheet = true }
                 )
             }
@@ -235,6 +238,7 @@ fun FoxyMusicApp() {
             composable("storage") { StorageScreen(navController) }
             composable("updater") { UpdaterScreen(navController) }
             composable("about") { AboutScreen(navController) }
+            composable("flutter_ui") { FlutterHostScreen() }
         }
     }
 
@@ -268,6 +272,10 @@ fun FoxyMusicApp() {
             onAbout = {
                 showAccountSheet = false
                 navController.navigateSecondary("about")
+            },
+            onFlutterUi = {
+                showAccountSheet = false
+                navController.navigateSecondary("flutter_ui")
             }
         )
     }
@@ -295,14 +303,14 @@ private fun HomeActionsBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Spacer(modifier = Modifier.weight(1f))
-        SimpTopIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
+        FoxyTopBarIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
         Spacer(modifier = Modifier.width(4.dp))
         ProfileAvatar(account = account, size = 38.dp, onClick = onProfile)
     }
 }
 
 @Composable
-private fun SimpTopBar(
+private fun FoxyScreenTopBar(
     title: String,
     subtitle: String?,
     showSearchAction: Boolean,
@@ -332,7 +340,7 @@ private fun SimpTopBar(
             }
         }
         if (showSearchAction) {
-            SimpTopIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
+            FoxyTopBarIcon(Icons.Rounded.Search, "Search", iconSize, onSearch)
             Spacer(modifier = Modifier.width(4.dp))
         }
         ProfileAvatar(account = account, size = 38.dp, onClick = onProfile)
@@ -372,7 +380,7 @@ private fun ProfileAvatar(
 }
 
 @Composable
-private fun SimpTopIcon(icon: ImageVector, label: String, iconSize: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+private fun FoxyTopBarIcon(icon: ImageVector, label: String, iconSize: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     val colors = foxyPalette()
     IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
         Icon(icon, contentDescription = label, tint = colors.muted, modifier = Modifier.size(iconSize))
@@ -387,7 +395,8 @@ private fun AccountDialog(
     onLogin: () -> Unit,
     onLogout: () -> Unit,
     onSettings: () -> Unit,
-    onAbout: () -> Unit
+    onAbout: () -> Unit,
+    onFlutterUi: () -> Unit
 ) {
     val colors = foxyPalette()
     AlertDialog(
@@ -433,22 +442,23 @@ private fun AccountDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(account.displayName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            if (account.isSignedIn) account.email.ifBlank { "Personalized YouTube Music is active" } else "Connect for personalized recommendations",
+                            if (account.isSignedIn) account.email.ifBlank { "Personalized recommendations are on" } else "Connect for personalized picks and library sync",
                             color = colors.muted,
                             fontSize = 12.sp
                         )
                     }
-                    MetroChip(if (account.isSignedIn) "Log out" else "Log in", onClick = if (account.isSignedIn) onLogout else onLogin)
+                    FoxyPillChip(if (account.isSignedIn) "Log out" else "Log in", onClick = if (account.isSignedIn) onLogout else onLogin)
                 }
-                MetroIconTile(Icons.Rounded.Person, "Profile & discovery", "Charts, moods, and your listening hub", onClick = onProfile)
-                MetroIconTile(
+                FoxyListTile(Icons.Rounded.Person, "Profile & discovery", "Charts, moods, and your listening hub", onClick = onProfile)
+                FoxyListTile(
                     Icons.Rounded.Sync,
                     "Recommendations & library",
-                    if (account.isSignedIn) "Using your YouTube Music session for Home and future sync" else "Sign in for personalized Home and synced library features",
+                    if (account.isSignedIn) "Using your signed-in session for Home and library" else "Sign in for personalized Home and synced library",
                     onClick = if (account.isSignedIn) ({}) else onLogin
                 )
-                MetroIconTile(Icons.Rounded.Settings, "Settings", onClick = onSettings)
-                MetroIconTile(Icons.Rounded.Info, "About", onClick = onAbout)
+                FoxyListTile(Icons.Rounded.Settings, "Settings", onClick = onSettings)
+                FoxyListTile(Icons.Rounded.PhoneIphone, "Flutter preview", "Launch add-to-app host", onClick = onFlutterUi)
+                FoxyListTile(Icons.Rounded.Info, "About", onClick = onAbout)
             }
         },
         confirmButton = {}

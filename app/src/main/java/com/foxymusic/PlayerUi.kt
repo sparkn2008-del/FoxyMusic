@@ -5,11 +5,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.MarqueeAnimationMode
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
@@ -86,8 +83,13 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
         }
     }
 
-    val durationMs = playerState.durationMs.coerceAtLeast(1L)
-    val progress = (playerState.positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    val rawDuration = playerState.durationMs
+    val durationKnown = rawDuration > 750L
+    val progress = if (durationKnown) {
+        (playerState.positionMs.toFloat() / rawDuration.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
     val positionMs = playerState.positionMs
     val liked = song?.let { s -> library.likedSongs.any { it.videoId == s.videoId } } == true
 
@@ -127,12 +129,10 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
                 color = Color.White,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(iterations = Int.MAX_VALUE, animationMode = MarqueeAnimationMode.WhileFocused)
-                    .focusable()
+                modifier = Modifier.fillMaxWidth()
             )
             Text(
                 text = song?.artist.orEmpty(),
@@ -144,8 +144,6 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 6.dp)
-                    .basicMarquee(iterations = Int.MAX_VALUE, animationMode = MarqueeAnimationMode.WhileFocused)
-                    .focusable()
             )
 
             AnimatedVisibility(visible = lyricsOpen) {
@@ -164,10 +162,10 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
             PlayerProgress(
                 progress = progress,
                 onProgressChange = { p ->
-                    MusicPlayer.seekTo((p * durationMs).toLong())
+                    if (durationKnown) MusicPlayer.seekTo((p * rawDuration).toLong())
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = playerState.durationMs > 750L
+                enabled = durationKnown
             )
 
             Row(
@@ -177,7 +175,11 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(formatPlaybackTime(positionMs), color = colors.muted, fontSize = 12.sp)
-                Text(formatPlaybackTime(durationMs), color = colors.muted, fontSize = 12.sp)
+                Text(
+                    if (durationKnown) formatPlaybackTime(rawDuration) else "—:—",
+                    color = colors.muted,
+                    fontSize = 12.sp
+                )
             }
 
             Spacer(Modifier.height(20.dp))
@@ -494,8 +496,13 @@ fun PersistentMiniPlayer(
     val settings by FoxySettings.state.collectAsState()
     val library by FoxyLibraryStore.state
     val liked = library.likedSongs.any { it.videoId == song.videoId }
-    val dur = state.durationMs.coerceAtLeast(1L)
-    val progress = (state.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+    val durRaw = state.durationMs
+    val durationKnown = durRaw > 750L
+    val progress = if (durationKnown) {
+        (state.positionMs.toFloat() / durRaw.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
 
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -597,66 +604,70 @@ fun PersistentMiniPlayer(
                 ) {
                     MiniArtworkThumb(song = song, colors = colors, thumbDp = if (settings.compactPlayer) 36.dp else 44.dp)
                     Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(4.dp))
+                    ) {
                         Text(
                             song.title,
                             color = Color.White,
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .basicMarquee(
-                                    iterations = Int.MAX_VALUE,
-                                    animationMode = MarqueeAnimationMode.Immediately
-                                )
-                                .focusable()
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Text(
                             song.artist,
                             color = colors.muted,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .basicMarquee(
-                                    iterations = Int.MAX_VALUE,
-                                    animationMode = MarqueeAnimationMode.Immediately
-                                )
-                                .focusable()
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
 
-                Spacer(Modifier.width(15.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { FoxyLibraryStore.toggleLiked(song) }) {
+                        Icon(
+                            if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = "Like",
+                            tint = if (liked) colors.accent else colors.muted
+                        )
+                    }
 
-                IconButton(onClick = { FoxyLibraryStore.toggleLiked(song) }) {
-                    Icon(
-                        if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = "Like",
-                        tint = if (liked) colors.accent else colors.muted
-                    )
-                }
-
-                Spacer(Modifier.width(15.dp))
-
-                Crossfade(targetState = state.isBuffering, label = "mini_buf") { buffering ->
-                    if (buffering) {
-                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(
-                                Modifier.size(18.dp),
-                                color = Color.LightGray,
-                                strokeWidth = 3.dp
-                            )
+                    Crossfade(targetState = state.isBuffering, label = "mini_buf") { buffering ->
+                        if (buffering) {
+                            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    Modifier.size(18.dp),
+                                    color = Color.LightGray,
+                                    strokeWidth = 3.dp
+                                )
+                            }
+                        } else {
+                            IconButton(onClick = onPlayPause, modifier = Modifier.size(48.dp)) {
+                                Icon(
+                                    if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = "Play",
+                                    tint = colors.accent,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
                         }
-                    } else {
-                        IconButton(onClick = onPlayPause, modifier = Modifier.size(48.dp)) {
-                            Icon(
-                                if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = "Play",
-                                tint = colors.accent,
-                                modifier = Modifier.size(30.dp)
-                            )
-                        }
+                    }
+
+                    IconButton(onClick = { MusicPlayer.playNext() }, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "Next",
+                            tint = colors.muted,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
                 }
             }

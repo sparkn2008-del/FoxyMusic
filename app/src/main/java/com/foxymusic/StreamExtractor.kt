@@ -45,15 +45,35 @@ object StreamExtractor {
     const val STREAM_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 
-    private val client = OkHttpClient.Builder()
-        .retryOnConnectionFailure(true)
-        .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(18, TimeUnit.SECONDS)
-        .build()
-
     @Volatile
     private var isNewPipeReady = false
+
+    @Volatile
+    private var httpClientSeed: String = ""
+
+    @Volatile
+    private var httpClient: OkHttpClient? = null
+
+    private fun httpClient(): OkHttpClient {
+        val s = FoxySettings.state.value
+        val seed = "${s.proxyEnabled}|${s.proxyEndpoint}"
+        var c = httpClient
+        if (c != null && seed == httpClientSeed) return c
+        synchronized(this) {
+            c = httpClient
+            if (c != null && seed == httpClientSeed) return c
+            val nb = OkHttpClient.Builder()
+                .retryOnConnectionFailure(true)
+                .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(18, TimeUnit.SECONDS)
+            FoxyNetworking.applyProxy(nb)
+            val built = nb.build()
+            httpClient = built
+            httpClientSeed = seed
+            return built
+        }
+    }
 
     private val clients = listOf(
         YouTubeClient(
@@ -151,7 +171,12 @@ object StreamExtractor {
 
     fun getStreamUrl(videoId: String): String? = getStreamResult(videoId).url
 
-    fun getStreamResult(videoId: String): StreamResult {
+    fun getStreamResult(videoId: String): StreamResult =
+        getStreamResult(videoId, FoxySettings.state.value.streamQualityTier)
+
+    fun getStreamResult(videoId: String, qualityTier: Int): StreamResult {
+        val tier = qualityTier.coerceIn(0, 2)
+        val maxBitrate = maxBitrateForTier(tier)
         val extractorErrors = mutableListOf<String>()
         var lastError: String? = null
 
@@ -171,7 +196,7 @@ object StreamExtractor {
                     .addFoxyAccountHeaders(ytClient.origin)
                     .build()
 
-                client.newCall(request).execute().use { response ->
+                httpClient().newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         lastError = "YouTube player request failed (${response.code})"
                         Log.w(TAG, "${ytClient.name} HTTP failed: ${response.code}")
@@ -191,7 +216,7 @@ object StreamExtractor {
                     }
 
                     val streamingData = json.optJSONObject("streamingData")
-                    val streamUrl = streamingData?.let(::pickBestPlayableUrl)
+                    val streamUrl = streamingData?.let { pickBestPlayableUrl(it, maxBitrate) }
                     if (!streamUrl.isNullOrBlank()) {
                         Log.d(TAG, "${ytClient.name} stream selected: ${streamUrl.take(80)}")
                         return StreamResult(streamUrl, source = ytClient.name)
@@ -206,7 +231,7 @@ object StreamExtractor {
         }
 
         lastError?.let { extractorErrors += it }
-        when (val newPipeResult = getNewPipeStreamResult(videoId)) {
+        when (val newPipeResult = getNewPipeStreamResult(videoId, maxBitrate)) {
             is ExtractorAttempt.Success -> {
                 Log.d(TAG, "NewPipe stream selected: ${newPipeResult.url.take(80)}")
                 return StreamResult(newPipeResult.url, source = "NewPipe")
@@ -246,12 +271,18 @@ object StreamExtractor {
         return body
     }
 
-    private fun pickBestPlayableUrl(streamingData: JSONObject): String? {
+    private fun maxBitrateForTier(tier: Int): Int? = when (tier) {
+        0 -> 96_000
+        1 -> 160_000
+        else -> null
+    }
+
+    private fun pickBestPlayableUrl(streamingData: JSONObject, maxBitrate: Int?): String? {
         val candidates = mutableListOf<JSONObject>()
         streamingData.optJSONArray("adaptiveFormats")?.appendAudioFormatsTo(candidates)
         streamingData.optJSONArray("formats")?.appendAudioFormatsTo(candidates)
 
-        candidates
+        val sorted = candidates
             .sortedWith(
                 compareByDescending<JSONObject> { it.optInt("audioQualityRank") }
                     .thenByDescending { it.optInt("bitrate") }
@@ -265,6 +296,17 @@ object StreamExtractor {
                         }
                     }
             )
+
+        val filtered = if (maxBitrate == null) {
+            sorted
+        } else {
+            sorted.filter { fmt ->
+                val br = fmt.optInt("bitrate", 0)
+                br == 0 || br <= maxBitrate
+            }.ifEmpty { sorted }
+        }
+
+        filtered
             .firstNotNullOfOrNull { it.directUrl() }
             ?.let { return it }
 
@@ -318,7 +360,7 @@ object StreamExtractor {
         }
     }
 
-    private fun getNewPipeStreamResult(videoId: String): ExtractorAttempt {
+    private fun getNewPipeStreamResult(videoId: String, maxBitrate: Int?): ExtractorAttempt {
         return try {
             ensureNewPipe()
             val streamInfo = StreamInfo.getInfo(
@@ -326,9 +368,17 @@ object StreamExtractor {
                 "https://www.youtube.com/watch?v=$videoId"
             )
 
-            val audioStream = streamInfo.audioStreams
-                .filter { !it.content.isNullOrBlank() }
-                .maxByOrNull { it.averageBitrate ?: 0 }
+            val candidates = streamInfo.audioStreams.filter { !it.content.isNullOrBlank() }
+            val filtered = if (maxBitrate == null) {
+                candidates
+            } else {
+                candidates.filter { stream ->
+                    val br = stream.averageBitrate ?: 0
+                    br == 0 || br <= maxBitrate
+                }.ifEmpty { candidates }
+            }
+
+            val audioStream = filtered.maxByOrNull { it.averageBitrate ?: 0 }
 
             val url = audioStream?.content
             if (url.isNullOrBlank()) {
@@ -348,7 +398,7 @@ object StreamExtractor {
         synchronized(this) {
             if (!isNewPipeReady) {
                 YoutubeParsingHelper.setConsentAccepted(true)
-                NewPipe.init(FoxyNewPipeDownloader(client))
+                NewPipe.init(FoxyNewPipeDownloader(httpClient()))
                 isNewPipeReady = true
             }
         }

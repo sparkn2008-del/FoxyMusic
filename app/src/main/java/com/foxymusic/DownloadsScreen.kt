@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +49,16 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
     val context = LocalContext.current
     val library by FoxyLibraryStore.state
     val playerState by MusicPlayer.state.collectAsState()
+    val totalDownloadedBytes by remember(library.downloadedSongs) {
+        androidx.compose.runtime.mutableLongStateOf(
+            library.downloadedSongs.sumOf { song ->
+                val p = song.localPath
+                if (p.isNullOrBlank()) 0L else kotlin.runCatching { java.io.File(p).length() }.getOrDefault(0L)
+            }
+        )
+    }
+
+    val totalDownloadedLabel = remember(totalDownloadedBytes) { formatBytes(totalDownloadedBytes) }
     var menuSong by remember { mutableStateOf<Song?>(null) }
 
     fun play(song: Song) {
@@ -78,7 +89,11 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
             item {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Downloads", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
-                Text("${library.downloadedSongs.size} songs ready offline", color = colors.muted, fontSize = 13.sp)
+                Text(
+                    "${library.downloadedSongs.size} songs ready offline • ${totalDownloadedLabel}",
+                    color = colors.muted,
+                    fontSize = 13.sp
+                )
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
@@ -137,7 +152,7 @@ fun DownloadsScreen(navController: androidx.navigation.NavController? = null) {
                 }
             }
 
-            if (library.downloadedSongs.isEmpty()) {
+            if (library.downloadedSongs.isEmpty() && library.downloadProgress.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier
@@ -183,7 +198,7 @@ private fun DownloadRow(song: Song, isCurrent: Boolean, isPlaying: Boolean, onPl
             .background(
                 color = if (isCurrent) colors.accent.copy(alpha = 0.13f) else colors.surface.copy(alpha = 0.72f)
             )
-            .clickable { onPlay() }
+            .clickable { if (isPlaying) MusicPlayer.togglePlayPause() else onPlay() }
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -202,11 +217,28 @@ private fun DownloadRow(song: Song, isCurrent: Boolean, isPlaying: Boolean, onPl
                 )
             }
         }
-        IconButton(onClick = onPlay) {
-            Icon(if (isPlaying) Icons.Rounded.CloudDone else Icons.Rounded.PlayArrow, contentDescription = "Play", tint = colors.accent)
+        IconButton(onClick = { if (isPlaying) MusicPlayer.togglePlayPause() else onPlay() }) {
+            Icon(
+                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = "Play",
+                tint = colors.accent
+            )
         }
         IconButton(onClick = onMore) {
             Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = colors.muted)
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val b = bytes.coerceAtLeast(0L)
+    val units = arrayOf("B", "KB", "MB", "GB")
+    var value = b.toDouble()
+    var idx = 0
+    while (value >= 1024.0 && idx < units.lastIndex) {
+        value /= 1024.0
+        idx++
+    }
+    val rounded = if (idx == 0) value.toLong().toString() else String.format(java.util.Locale.US, "%.1f", value)
+    return "$rounded ${units[idx]}"
 }

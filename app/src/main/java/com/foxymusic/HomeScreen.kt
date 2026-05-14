@@ -45,10 +45,24 @@ private data class HomeFeed(
     val discovery: List<RecommendationSection> = emptyList()
 )
 
+private object HomeScreenMemoryCache {
+    var cookie: String? = null
+    var feed: HomeFeed = HomeFeed()
+    val moodTracks: MutableMap<String, List<Song>> = mutableMapOf()
+}
+
+private fun HomeFeed.hasContent(): Boolean =
+    homeSections.isNotEmpty() ||
+        chartsSections.isNotEmpty() ||
+        songs.isNotEmpty() ||
+        videos.isNotEmpty() ||
+        podcasts.isNotEmpty() ||
+        playlists.isNotEmpty() ||
+        discovery.isNotEmpty()
+
 @OptIn(ExperimentalMaterialApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    onPlayAll: () -> Unit = {},
     onSongPlay: () -> Unit = {}
 ) {
     val playerState by MusicPlayer.state.collectAsState()
@@ -57,8 +71,8 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var feed by remember { mutableStateOf(HomeFeed()) }
-    var loading by remember { mutableStateOf(false) }
+    var feed by remember { mutableStateOf(HomeScreenMemoryCache.feed) }
+    var loading by remember { mutableStateOf(!HomeScreenMemoryCache.feed.hasContent()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var menuSong by remember { mutableStateOf<Song?>(null) }
@@ -74,7 +88,14 @@ fun HomeScreen(
         }
     }
 
-    fun loadHome() {
+    fun loadHome(force: Boolean = false) {
+        val cached = HomeScreenMemoryCache.feed
+        if (!force && HomeScreenMemoryCache.cookie == account.cookie && cached.hasContent()) {
+            feed = cached
+            loading = false
+            refreshing = false
+            return
+        }
         loading = true
         error = null
         scope.launch {
@@ -108,15 +129,31 @@ fun HomeScreen(
                 error = it.message ?: "Home could not refresh"
                 HomeFeed(homeSections = YTMusicApi.homeRecommendations())
             }
+            HomeScreenMemoryCache.cookie = account.cookie
+            HomeScreenMemoryCache.feed = feed
             loading = false
             refreshing = false
         }
     }
 
     val quickSongs = feed.homeSections.firstOrNull()?.songs.orEmpty().ifEmpty { feed.songs }
+    val homeMoods = listOf("Energize", "Focus", "Chill", "Workout", "Romance", "Late Night", "Hindi", "Punjabi")
+    var selectedMood by remember { mutableStateOf(homeMoods.first()) }
+    var moodTracks by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var moodLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedMood, account.cookie) {
+        moodLoading = true
+        val cacheKey = "${account.cookie.orEmpty()}:$selectedMood"
+        moodTracks = HomeScreenMemoryCache.moodTracks[cacheKey] ?: runCatching {
+            withContext(Dispatchers.IO) { YTMusicApi.getMoodMix(selectedMood) }
+        }.getOrDefault(emptyList()).also { HomeScreenMemoryCache.moodTracks[cacheKey] = it }
+        moodLoading = false
+    }
+
     val pullRefreshState = rememberPullRefreshState(refreshing, onRefresh = {
         refreshing = true
-        loadHome()
+        loadHome(force = true)
     })
 
     LaunchedEffect(account.cookie) { loadHome() }
@@ -148,7 +185,14 @@ fun HomeScreen(
             }
 
             item {
-                SectionHeader("Quick picks", "Browse", onPlayAll)
+                SectionHeader("Quick picks", "Play all") {
+                    if (quickSongs.isNotEmpty()) {
+                        scope.launch {
+                            MusicPlayer.playQueue(context, quickSongs, 0)
+                            onSongPlay()
+                        }
+                    }
+                }
                 Column(
                     Modifier
                         .padding(horizontal = 12.dp)
@@ -169,16 +213,26 @@ fun HomeScreen(
                 }
             }
 
-            item { MoodStrip { mood ->
-                scope.launch {
-                    YTMusicApi.getMoodMix(mood).also {
-                        if (it.isNotEmpty()) {
-                            MusicPlayer.playQueue(context, it, 0)
-                            onSongPlay()
-                        }
-                    }
-                }
-            } }
+            item {
+                MoodStrip(
+                    moods = homeMoods,
+                    selected = selectedMood,
+                    onSelect = { selectedMood = it }
+                )
+            }
+
+            item {
+                MoodMixShelf(
+                    mood = selectedMood,
+                    tracks = moodTracks,
+                    loading = moodLoading,
+                    playerState = playerState,
+                    onPlayAll = {
+                        if (moodTracks.isNotEmpty()) playSong(moodTracks.first(), moodTracks)
+                    },
+                    onPlaySong = { s -> playSong(s, moodTracks) }
+                )
+            }
 
             item {
                 HomeSpotlight(
@@ -234,16 +288,110 @@ fun HomeScreen(
     menuSong?.let { SongActionMenu(song = it, onDismiss = { menuSong = null }) }
 }
 
-// ==================== Helper Composables ====================
-
 @Composable
-private fun MoodStrip(onMood: (String) -> Unit) {
+private fun MoodStrip(
+    moods: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        listOf("Energize", "Focus", "Chill", "Workout", "Romance", "Late Night", "Hindi", "Punjabi").forEachIndexed { index, mood ->
-            MetroChip(label = mood, selected = index == 0, onClick = { onMood(mood) })
+        moods.forEach { mood ->
+            FoxyPillChip(label = mood, selected = mood == selected, onClick = { onSelect(mood) })
+        }
+    }
+}
+
+@Composable
+private fun MoodMixShelf(
+    mood: String,
+    tracks: List<Song>,
+    loading: Boolean,
+    playerState: PlayerUiState,
+    onPlayAll: () -> Unit,
+    onPlaySong: (Song) -> Unit
+) {
+    val colors = foxyColors()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surface.copy(alpha = 0.42f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Your mix", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                Text(
+                    "$mood station",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    when {
+                        loading -> "Loading picks…"
+                        tracks.isEmpty() -> "No tracks for this mood yet — try another chip or refresh."
+                        else -> "${tracks.size} songs · tap a row to play"
+                    },
+                    color = colors.muted,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(
+                onClick = onPlayAll,
+                enabled = tracks.isNotEmpty() && !loading
+            ) {
+                Text("Play", color = colors.accent, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (loading) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
+                color = colors.accent,
+                trackColor = Color.White.copy(alpha = 0.08f)
+            )
+        }
+        if (!loading && tracks.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(tracks.take(24), key = { it.videoId }) { song ->
+                    val current = playerState.currentSong?.videoId == song.videoId
+                    Column(
+                        Modifier
+                            .width(132.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (current) colors.accent.copy(alpha = 0.14f) else Color.Transparent)
+                            .clickable { onPlaySong(song) }
+                            .padding(8.dp)
+                    ) {
+                        TrackArtwork(song = song, modifier = Modifier.fillMaxWidth().aspectRatio(1f), cornerRadius = 10.dp)
+                        Text(
+                            song.title,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                        Text(
+                            song.artist,
+                            color = colors.muted,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
         }
     }
 }

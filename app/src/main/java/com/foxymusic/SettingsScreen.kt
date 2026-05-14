@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -435,9 +436,17 @@ private fun SettingChoiceRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             options.forEachIndexed { index, label ->
                 FilterChip(
+                    modifier = Modifier.weight(1f),
                     selected = selectedIndex == index,
                     onClick = { onSelect(index) },
-                    label = { Text(label, fontSize = 12.sp) },
+                    label = {
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colors.accent.copy(alpha = 0.24f),
                         selectedLabelColor = Color.White,

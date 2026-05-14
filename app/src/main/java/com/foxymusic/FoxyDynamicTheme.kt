@@ -18,9 +18,16 @@ object FoxyDynamicTheme {
     private val _accent = MutableStateFlow<Color?>(null)
     val accent: StateFlow<Color?> = _accent
 
+    fun clearAccent() {
+        _accent.value = null
+    }
+
     fun updateFromSong(song: Song) {
         val artworkUrl = song.bestArtworkUrl()
-        if (artworkUrl.isBlank()) return
+        if (artworkUrl.isBlank()) {
+            clearAccent()
+            return
+        }
         scope.launch {
             runCatching {
                 val request = Request.Builder().url(artworkUrl).build()

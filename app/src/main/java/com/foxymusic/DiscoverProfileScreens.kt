@@ -151,11 +151,11 @@ fun DiscoverScreen(navController: NavController) {
 
         item {
             SectionLabel("Editorial shortcuts")
-            MetroIconTile(Icons.Rounded.Radio, "Start a smart radio", "Builds a station from your current taste", onClick = { navController.navigate("search") })
+            FoxyListTile(Icons.Rounded.Radio, "Start a smart radio", "Builds a station from your current taste", onClick = { navController.navigate("search") })
             Spacer(modifier = Modifier.height(10.dp))
-            MetroIconTile(Icons.Rounded.Equalizer, "Audio-first discovery", "High-energy, focus, chill and late-night clusters")
+            FoxyListTile(Icons.Rounded.Equalizer, "Audio-first discovery", "High-energy, focus, chill and late-night clusters")
             Spacer(modifier = Modifier.height(10.dp))
-            MetroIconTile(Icons.Rounded.QueueMusic, "Queue builder", "Search songs and turn them into a listening session")
+            FoxyListTile(Icons.Rounded.QueueMusic, "Queue builder", "Search songs and turn them into a listening session")
         }
     }
 }
@@ -258,15 +258,15 @@ fun ProfileScreen(navController: NavController) {
         }
 
         item {
-            MetroIconTile(
+            FoxyListTile(
                 if (account.isSignedIn) Icons.Rounded.Favorite else Icons.Rounded.Login,
                 if (account.isSignedIn) "Account recommendations active" else "Connect YouTube Music",
                 if (account.isSignedIn) account.email.ifBlank { "Session stored locally" } else "Unlock personalized home, library sync foundation, and better browse results",
                 onClick = { if (!account.isSignedIn) navController.navigate("login") }
             )
         }
-        item { MetroIconTile(Icons.Rounded.Download, "Downloads", "Offline music and cache controls", onClick = { navController.navigate("downloads") }) }
-        item { MetroIconTile(Icons.Rounded.Settings, "Settings", "Appearance, player, privacy and experiments", onClick = { navController.navigate("settings") }) }
+        item { FoxyListTile(Icons.Rounded.Download, "Downloads", "Offline music and cache controls", onClick = { navController.navigate("downloads") }) }
+        item { FoxyListTile(Icons.Rounded.Settings, "Settings", "Appearance, player, privacy and experiments", onClick = { navController.navigate("settings") }) }
     }
 }
 

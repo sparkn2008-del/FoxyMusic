@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,9 @@ fun SongActionMenu(
 ) {
     val context = LocalContext.current
     val colors = foxyPalette()
+    val library by FoxyLibraryStore.state
+    val isDownloaded = library.isDownloaded(song)
+    val isDownloading = FoxyDownloadManager.isDownloading(song.videoId)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -74,9 +78,16 @@ fun SongActionMenu(
                 onDismiss()
             }
 
-            ActionItem(Icons.Rounded.Download, "Download") {
-                // Download logic will be added later
+            if (isDownloaded) {
+                ActionItem(Icons.Rounded.Delete, "Remove download") {
+                    FoxyDownloadManager.removeDownload(context, song)
+                    onDismiss()
+                }
+            } else {
+                ActionItem(Icons.Rounded.Download, if (isDownloading) "Downloading..." else "Download") {
+                    if (!isDownloading) FoxyDownloadManager.downloadSong(context, song)
                 onDismiss()
+                }
             }
 
             ActionItem(Icons.Rounded.PlaylistAdd, "Add to Playlist") { onDismiss() }

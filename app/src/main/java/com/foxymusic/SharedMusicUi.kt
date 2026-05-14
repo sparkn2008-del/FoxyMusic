@@ -83,7 +83,7 @@ fun HomeHero(
 
 @Composable
 fun HomeSectionHeader(title: String, action: String? = null, onAction: () -> Unit = {}) {
-    MetroSectionTitle(title = title, action = action, onAction = onAction)
+    FoxySectionTitle(title = title, action = action, onAction = onAction)
 }
 
 @Composable
@@ -95,7 +95,7 @@ fun FoxySongRow(
     onMore: (() -> Unit)? = null
 ) {
     val colors = foxyPalette()
-    MetroSongRow(
+    FoxySongRow(
         song = song,
         modifier = Modifier.background(
             color = if (isCurrent) colors.accent.copy(alpha = 0.12f) else Color.Transparent
@@ -121,7 +121,7 @@ fun RecommendationRail(
     onSongMore: (Song) -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        MetroSectionTitle(section.title, modifier = Modifier.padding(horizontal = 18.dp))
+        FoxySectionTitle(section.title, modifier = Modifier.padding(horizontal = 18.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Spacer(Modifier.width(6.dp)) }
             items(section.songs, key = { it.videoId }) { song ->

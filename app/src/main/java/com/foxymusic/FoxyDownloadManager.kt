@@ -1,0 +1,145 @@
+package com.foxymusic
+
+import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Minimal offline downloader.
+ *
+ * For now this supports direct progressive URLs (mp4/webm/etc) returned by [StreamExtractor].
+ * HLS manifest downloads are not supported in this first iteration.
+ */
+object FoxyDownloadManager {
+    private const val TAG = "FoxyDownloadManager"
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val client = OkHttpClient.Builder()
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private val activeDownloads = ConcurrentHashMap<String, Boolean>()
+
+    fun isDownloading(videoId: String): Boolean = activeDownloads[videoId] == true
+
+    fun downloadSong(context: Context, song: Song) {
+        if (isDownloading(song.videoId)) return
+        if (song.isDownloaded && !song.localPath.isNullOrBlank()) return
+
+        val localDir = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+        val outputPathBase = File(localDir, song.videoId).absolutePath
+
+        scope.launch {
+            activeDownloads[song.videoId] = true
+            var outFile: File? = null
+            try {
+                val result = withContext(Dispatchers.IO) { StreamExtractor.getStreamResult(song.videoId) }
+                val url = result.url
+                if (url.isNullOrBlank()) {
+                    Log.w(TAG, "No downloadable URL for ${song.videoId}: ${result.error}")
+                    return@launch
+                }
+
+                if (url.contains(".m3u8")) {
+                    // Use Media3 downloader for HLS.
+                    FoxyLibraryStore.setDownloadProgress(song.videoId, 0.01f)
+                    FoxyMedia3Downloads.addDownload(context, song, url)
+                    return@launch
+                }
+
+                val ext = outputExtFromUrl(url)
+                outFile = File("$outputPathBase$ext")
+
+                // Reset progress UI
+                FoxyLibraryStore.setDownloadProgress(song.videoId, 0f)
+
+                val account = FoxyAccount.state.value
+                val requestBuilder = Request.Builder()
+                    .url(url)
+                    .addHeader("User-Agent", StreamExtractor.STREAM_USER_AGENT)
+                    .addHeader("Origin", "https://music.youtube.com")
+                    .addHeader("Referer", "https://music.youtube.com/")
+
+                if (account.cookie.isNotBlank()) {
+                    requestBuilder.addHeader("Cookie", account.cookie)
+                    account.cookie.sapisidHashHeader()?.let { requestBuilder.addHeader("Authorization", it) }
+                }
+
+                val request = requestBuilder.build()
+
+                client.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        throw IllegalStateException("HTTP ${resp.code} while downloading ${song.videoId}")
+                    }
+
+                    val body = resp.body ?: throw IllegalStateException("Empty response body")
+                    val contentLength = body.contentLength().coerceAtLeast(1L)
+
+                    FileOutputStream(outFile).use { out ->
+                        var downloaded = 0L
+                        val buffer = ByteArray(128 * 1024)
+                        while (true) {
+                            val read = body.byteStream().read(buffer)
+                            if (read <= 0) break
+                            out.write(buffer, 0, read)
+                            downloaded += read
+                            val progress = downloaded.toFloat() / contentLength.toFloat()
+                            FoxyLibraryStore.setDownloadProgress(song.videoId, progress)
+                        }
+                        out.flush()
+                    }
+                }
+
+                if (outFile.length() <= 0L) {
+                    Log.w(TAG, "Downloaded file is empty: ${outFile.absolutePath}")
+                    outFile.delete()
+                    return@launch
+                }
+
+                val finalSong = song.copy(
+                    localPath = outFile.absolutePath,
+                    isDownloaded = true,
+                    streamUrl = null
+                )
+                FoxyLibraryStore.markAsDownloaded(finalSong, outFile.absolutePath)
+                FoxyLibraryStore.clearDownloadProgress(song.videoId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Download failed for ${song.videoId}: ${e.message}", e)
+                // Clear progress so UI doesn't get stuck.
+                FoxyLibraryStore.clearDownloadProgress(song.videoId)
+                outFile?.delete()
+            } finally {
+                activeDownloads[song.videoId] = false
+            }
+        }
+    }
+
+    fun removeDownload(context: Context, song: Song) {
+        activeDownloads[song.videoId] = false
+        FoxyLibraryStore.removeDownload(song, context)
+    }
+
+    private fun outputExtFromUrl(url: String): String {
+        return when {
+            url.contains(".webm", ignoreCase = true) -> ".webm"
+            url.contains(".mp4", ignoreCase = true) -> ".mp4"
+            url.contains(".m4a", ignoreCase = true) -> ".m4a"
+            url.contains(".opus", ignoreCase = true) -> ".opus"
+            url.contains("audio%2Fwebm", ignoreCase = true) || url.contains("audio/webm", ignoreCase = true) -> ".webm"
+            url.contains("audio%2Fmp4", ignoreCase = true) || url.contains("audio/mp4", ignoreCase = true) -> ".mp4"
+            else -> ".media"
+        }
+    }
+
+    // (best-effort) future: support HLS offline downloads using Media3 DownloadManager.
+}
+

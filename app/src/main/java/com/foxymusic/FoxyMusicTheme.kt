@@ -70,21 +70,24 @@ fun FoxyMusicTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
+    val customization by FoxySettings.state.collectAsState()
+    val dynamicAccent by FoxyDynamicTheme.accent.collectAsState()
+    val palette = customization.palette(dynamicAccent, darkTheme)
     val colors = FoxyColors(
-        accent = FoxyAccent,
+        accent = palette.accent,
         mint = FoxyMint,
-        surface = FoxySurface,
-        surfaceSoft = FoxySurfaceSoft,
-        pill = FoxyPill,
-        muted = FoxyMuted
+        surface = palette.background,
+        surfaceSoft = palette.surface,
+        pill = palette.pill,
+        muted = palette.muted
     )
 
     val colorScheme = darkColorScheme(
-        primary = FoxyAccent,
+        primary = palette.accent,
         secondary = FoxyMint,
-        background = FoxySurface,
-        surface = FoxySurface,
-        surfaceVariant = FoxySurfaceSoft,
+        background = palette.background,
+        surface = palette.surface,
+        surfaceVariant = palette.surfaceHigh,
         onBackground = Color.White,
         onSurface = Color.White,
         onPrimary = Color.Black,

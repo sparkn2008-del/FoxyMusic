@@ -184,7 +184,7 @@ private fun SearchTypeTabs() {
     val tabs = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists")
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(tabs) { tab ->
-            MetroChip(tab, selected = tab == "All")
+            FoxyPillChip(tab, selected = tab == "All")
         }
     }
 }
