@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FoxyMusic</string>
+    <string name="downloads_channel_name">Downloads</string>
+    <string name="downloads_channel_description">Offline downloads</string>
+    <string name="playback_channel_name">Now playing</string>
+    <string name="playback_channel_description">Playback controls and current track</string>
+</resources>
+
