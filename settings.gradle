@@ -25,7 +25,8 @@ dependencyResolutionManagement {
 rootProject.name = "FoxyMusic"
 include ':app'
 
-def flutterModulePath = new File(settingsDir, "foxy_flutter_ui/.android/include_flutter.groovy")
+// Flutter UI and Dart sources live at repo root (`pubspec.yaml`, `lib/`).
+def flutterModulePath = new File(settingsDir, ".android/include_flutter.groovy")
 if (flutterModulePath.exists()) {
     setBinding(new Binding([gradle: this]))
     evaluate(flutterModulePath)

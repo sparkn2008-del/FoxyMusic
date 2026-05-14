@@ -1,0 +1,140 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :gradle:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle:compileKotlin UP-TO-DATE
+> Task :gradle:compileJava NO-SOURCE
+> Task :gradle:compileGroovy NO-SOURCE
+> Task :gradle:pluginDescriptors UP-TO-DATE
+> Task :gradle:processResources UP-TO-DATE
+> Task :gradle:classes UP-TO-DATE
+> Task :gradle:jar UP-TO-DATE
+
+> Configure project :flutter
+Build was configured to prefer settings repositories over project repositories but repository 'maven' was added by plugin 'dev.flutter.flutter-gradle-plugin'
+Build was configured to prefer settings repositories over project repositories but repository 'maven' was added by plugin 'dev.flutter.flutter-gradle-plugin'
+Build was configured to prefer settings repositories over project repositories but repository 'maven' was added by plugin 'dev.flutter.flutter-gradle-plugin'
+WARNING: We recommend using a newer Android Gradle plugin to use compileSdk = 36
+
+This Android Gradle plugin (8.7.0) was tested up to compileSdk = 35.
+
+You are strongly encouraged to update your project to use a newer
+Android Gradle plugin that has been tested with compileSdk = 36.
+
+If you are already using the latest version of the Android Gradle plugin,
+you may need to wait until a newer version with support for compileSdk = 36 is available.
+
+For more information refer to the compatibility table:
+https://d.android.com/r/tools/api-level-support
+
+To suppress this warning, add/update
+    android.suppressUnsupportedCompileSdk=36
+to this project's gradle.properties.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :flutter:compileFlutterBuildRelease UP-TO-DATE
+> Task :flutter:packJniLibsflutterBuildRelease UP-TO-DATE
+> Task :flutter:preBuild UP-TO-DATE
+> Task :flutter:preReleaseBuild UP-TO-DATE
+
+> Task :flutter:configureCMakeRelease[arm64-v8a]
+[CXX5304] Observed package id 'cmdline-tools;latest' in inconsistent location 'C:\Android\cmdline-tools\latest-2' (Expected 'C:\Android\cmdline-tools\latest')
+[CXX5304] Observed package id 'cmdline-tools;latest' in inconsistent location 'C:\Android\cmdline-tools\latest-2' (Expected 'C:\Android\cmdline-tools\latest')
+
+> Task :flutter:buildCMakeRelease[arm64-v8a]
+> Task :flutter:configureCMakeRelease[armeabi-v7a]
+> Task :flutter:buildCMakeRelease[armeabi-v7a]
+> Task :flutter:configureCMakeRelease[x86_64]
+> Task :flutter:buildCMakeRelease[x86_64]
+> Task :flutter:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :flutter:mergeReleaseNativeLibs NO-SOURCE
+> Task :flutter:copyReleaseJniLibsProjectOnly
+> Task :app:mergeReleaseNativeLibs
+> Task :app:stripReleaseDebugSymbols
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:mergeReleaseNativeDebugMetadata UP-TO-DATE
+> Task :flutter:generateReleaseResValues UP-TO-DATE
+> Task :flutter:generateReleaseResources UP-TO-DATE
+> Task :flutter:packageReleaseResources UP-TO-DATE
+> Task :flutter:parseReleaseLocalResources UP-TO-DATE
+> Task :flutter:generateReleaseRFile UP-TO-DATE
+> Task :flutter:javaPreCompileRelease UP-TO-DATE
+> Task :flutter:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :flutter:extractProguardFiles UP-TO-DATE
+> Task :flutter:processReleaseManifest UP-TO-DATE
+> Task :flutter:generateReleaseLibraryProguardRules UP-TO-DATE
+> Task :flutter:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :flutter:processReleaseJavaRes NO-SOURCE
+> Task :flutter:mergeReleaseJavaResource UP-TO-DATE
+> Task :flutter:minifyReleaseWithR8 UP-TO-DATE
+> Task :flutter:bundleLibRuntimeToDirRelease
+> Task :app:checkReleaseDuplicateClasses UP-TO-DATE
+> Task :app:buildKotlinToolingMetadata UP-TO-DATE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :flutter:writeReleaseAarMetadata UP-TO-DATE
+> Task :app:checkReleaseAarMetadata UP-TO-DATE
+> Task :app:generateReleaseResValues UP-TO-DATE
+> Task :app:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :app:generateReleaseResources UP-TO-DATE
+> Task :app:mergeReleaseResources UP-TO-DATE
+> Task :app:packageReleaseResources UP-TO-DATE
+> Task :app:parseReleaseLocalResources UP-TO-DATE
+> Task :app:createReleaseCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksRelease UP-TO-DATE
+> Task :flutter:extractDeepLinksRelease UP-TO-DATE
+> Task :app:processReleaseMainManifest UP-TO-DATE
+> Task :app:processReleaseManifest UP-TO-DATE
+> Task :app:processReleaseManifestForPackage UP-TO-DATE
+> Task :flutter:compileReleaseLibraryResources UP-TO-DATE
+> Task :app:processReleaseResources UP-TO-DATE
+> Task :flutter:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :app:compileReleaseKotlin UP-TO-DATE
+> Task :app:javaPreCompileRelease UP-TO-DATE
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderRelease
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:mergeExtDexRelease
+> Task :app:mergeExtDexRelease UP-TO-DATE
+> Task :app:mergeDexRelease
+> Task :flutter:prepareReleaseArtProfile UP-TO-DATE
+> Task :app:mergeReleaseArtProfile UP-TO-DATE
+> Task :flutter:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :app:mergeReleaseGlobalSynthetics UP-TO-DATE
+> Task :app:compileReleaseArtProfile
+> Task :app:mergeReleaseShaders UP-TO-DATE
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :flutter:cleanPackageReleaseAssets
+> Task :flutter:mergeReleaseShaders UP-TO-DATE
+> Task :flutter:compileReleaseShaders NO-SOURCE
+> Task :flutter:generateReleaseAssets UP-TO-DATE
+> Task :flutter:packageReleaseAssets
+> Task :flutter:copyFlutterAssetsRelease
+> Task :app:mergeReleaseAssets UP-TO-DATE
+> Task :app:compressReleaseAssets UP-TO-DATE
+> Task :app:extractReleaseVersionControlInfo UP-TO-DATE
+> Task :app:processReleaseJavaRes UP-TO-DATE
+> Task :app:mergeReleaseJavaResource
+> Task :app:optimizeReleaseResources
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:stripReleaseFlutterNativeLibs
+> Task :app:validateSigningRelease UP-TO-DATE
+> Task :app:writeReleaseAppMetadata UP-TO-DATE
+> Task :app:writeReleaseSigningConfigVersions UP-TO-DATE
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+[Incubating] Problems report is available at: file:///D:/FoxyMusic/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 5m 37s
+83 actionable tasks: 25 executed, 58 up-to-date
