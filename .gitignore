@@ -26,3 +26,17 @@ foxy-screen.png
 
 # Local reference/study copy
 .metrolist-study/
+
+# Build outputs
+build/
+**/build/
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock   # (optional - some keep it)
+
+# Gradle
+.gradle/
+*.log
