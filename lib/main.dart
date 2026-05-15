@@ -5648,11 +5648,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                         'art-${song.videoId}',
                                                     offlineArtworkPath: song
                                                         .offlineArtworkPath,
-                                                    maxSide: artSide,
-                                                    fit: BoxFit.cover,                    // ← Add this
-                                                    filterQuality: FilterQuality.high,    // ← Add this
-                                                    cacheWidth: (artSide * 2).toInt(),    // ← Higher resolution cache
-                                                    cacheHeight: (artSide * 2).toInt(),
+                                                    maxSide: artSide
                                                   ),
                                                 ),
                                               ),
@@ -5869,18 +5865,14 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   ),
                                                 ),
                                               _MetrolistSeekBar(
-                                                value: progress,
+                                               value: progress,
                                                 enabled: effectiveDurMs > 750,
                                                 style: 0,
                                                 motion: _seekMotion,
                                                 accent: accent,
-                                                height: 6,
-                                                onSeek: (value) => _method
-                                                    .invokeMethod('seekTo', {
-                                                  'positionMs': (effectiveDurMs *
-                                                          value)
-                                                      .round(),
-                                                }),
+                                                onSeek: (value) => _method.invokeMethod('seekTo', {
+                                                'positionMs': (effectiveDurMs * value).round(),
+                                               }),
                                               ),
                                               Padding(
                                                 padding:
@@ -7129,7 +7121,8 @@ class _Artwork extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        gaplessPlayback: false,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.high,
         errorBuilder: (context, error, stackTrace) => placeholder,
       ),
     );
