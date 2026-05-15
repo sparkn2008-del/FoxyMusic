@@ -28,10 +28,11 @@ class MainActivity : FlutterActivity() {
         FoxySettings.init(applicationContext)
         FoxyAccount.init(applicationContext)
         FoxyLibraryStore.init(applicationContext)
+        FoxyUserPlaylists.init(applicationContext)
         MusicPlayer.init(applicationContext)
         FoxyMedia3Downloads.ensureInitialized(applicationContext)
 
-        val b = FoxyFlutterBridge(applicationContext)
+        val b = FoxyFlutterBridge(this)
         bridge = b
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FoxyFlutterChannels.METHOD_CHANNEL)
             .setMethodCallHandler(b)

@@ -110,7 +110,7 @@ fun PlayerScreen(song: Song?, isPlaying: Boolean) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
+                    .padding(horizontal = 9.dp)
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(28.dp))
                     .background(colors.surfaceHigh)
@@ -432,12 +432,12 @@ private fun FoxyMainTransportRow(isPlaying: Boolean, ui: PlayerUiState) {
                 Icons.Rounded.SkipPrevious,
                 contentDescription = "Previous",
                 tint = Color.White,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(50.dp)
             )
         }
         FilledIconButton(
             onClick = { MusicPlayer.togglePlayPause() },
-            modifier = Modifier.size(76.dp),
+            modifier = Modifier.size(86.dp),
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = Color.White.copy(alpha = 0.14f),
                 contentColor = Color.White
@@ -447,7 +447,7 @@ private fun FoxyMainTransportRow(isPlaying: Boolean, ui: PlayerUiState) {
             Icon(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = "Play",
-                modifier = Modifier.size(52.dp)
+                modifier = Modifier.size(62.dp)
             )
         }
         IconButton(onClick = { MusicPlayer.playNext() }) {
@@ -455,7 +455,7 @@ private fun FoxyMainTransportRow(isPlaying: Boolean, ui: PlayerUiState) {
                 Icons.Rounded.SkipNext,
                 contentDescription = "Next",
                 tint = Color.White,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(50.dp)
             )
         }
         IconButton(onClick = { MusicPlayer.cycleRepeatMode() }) {
@@ -467,7 +467,7 @@ private fun FoxyMainTransportRow(isPlaying: Boolean, ui: PlayerUiState) {
                 imageVector = if (ui.repeatMode == RepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
                 contentDescription = "Repeat",
                 tint = tint,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(38.dp)
             )
         }
     }

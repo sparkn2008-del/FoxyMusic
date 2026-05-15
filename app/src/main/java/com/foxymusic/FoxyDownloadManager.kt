@@ -28,6 +28,7 @@ object FoxyDownloadManager {
         .build()
 
     private val activeDownloads = ConcurrentHashMap<String, Boolean>()
+    private val lastNotifyPct = ConcurrentHashMap<String, Int>()
 
     fun isDownloading(videoId: String): Boolean = activeDownloads[videoId] == true
 
@@ -40,12 +41,16 @@ object FoxyDownloadManager {
 
         scope.launch {
             activeDownloads[song.videoId] = true
+            lastNotifyPct.remove(song.videoId)
+            val appCtx = context.applicationContext
+            FoxyActiveDownloadNotifier.ensureChannel(appCtx)
             var outFile: File? = null
             try {
                 val result = withContext(Dispatchers.IO) { StreamExtractor.getStreamResult(song.videoId) }
                 val url = result.url
                 if (url.isNullOrBlank()) {
                     Log.w(TAG, "No downloadable URL for ${song.videoId}: ${result.error}")
+                    FoxyActiveDownloadNotifier.cancel(appCtx, song.videoId)
                     return@launch
                 }
 
@@ -61,6 +66,7 @@ object FoxyDownloadManager {
 
                 // Reset progress UI
                 FoxyLibraryStore.setDownloadProgress(song.videoId, 0f)
+                FoxyActiveDownloadNotifier.notifyProgress(appCtx, song, 0f)
 
                 val account = FoxyAccount.state.value
                 val requestBuilder = Request.Builder()
@@ -94,6 +100,12 @@ object FoxyDownloadManager {
                             downloaded += read
                             val progress = downloaded.toFloat() / contentLength.toFloat()
                             FoxyLibraryStore.setDownloadProgress(song.videoId, progress)
+                            val pct = (progress * 100f).toInt().coerceIn(0, 100)
+                            val prev = lastNotifyPct[song.videoId] ?: -1
+                            if (pct >= prev + 2 || pct >= 99 || prev < 0) {
+                                lastNotifyPct[song.videoId] = pct
+                                FoxyActiveDownloadNotifier.notifyProgress(appCtx, song, progress)
+                            }
                         }
                         out.flush()
                     }
@@ -102,6 +114,7 @@ object FoxyDownloadManager {
                 if (outFile.length() <= 0L) {
                     Log.w(TAG, "Downloaded file is empty: ${outFile.absolutePath}")
                     outFile.delete()
+                    FoxyActiveDownloadNotifier.cancel(appCtx, song.videoId)
                     return@launch
                 }
 
@@ -112,19 +125,23 @@ object FoxyDownloadManager {
                 )
                 FoxyLibraryStore.markAsDownloaded(finalSong, outFile.absolutePath)
                 FoxyLibraryStore.clearDownloadProgress(song.videoId)
+                FoxyActiveDownloadNotifier.cancel(appCtx, song.videoId)
             } catch (e: Exception) {
                 Log.e(TAG, "Download failed for ${song.videoId}: ${e.message}", e)
                 // Clear progress so UI doesn't get stuck.
                 FoxyLibraryStore.clearDownloadProgress(song.videoId)
+                FoxyActiveDownloadNotifier.cancel(appCtx, song.videoId)
                 outFile?.delete()
             } finally {
                 activeDownloads[song.videoId] = false
+                lastNotifyPct.remove(song.videoId)
             }
         }
     }
 
     fun removeDownload(context: Context, song: Song) {
         activeDownloads[song.videoId] = false
+        runCatching { FoxyMedia3Downloads.removeDownload(context, song.videoId) }
         FoxyLibraryStore.removeDownload(song, context)
     }
 

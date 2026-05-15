@@ -37,6 +37,14 @@ object FoxyFlutterChannels {
         const val GET_APPEARANCE = "getAppearance"
         const val SET_APPEARANCE = "setAppearance"
         const val LIBRARY_FEED = "libraryFeed"
+        const val PLAYLIST_CREATE = "playlistCreate"
+        const val PLAYLIST_RENAME = "playlistRename"
+        const val PLAYLIST_DELETE = "playlistDelete"
+        const val PLAYLIST_ADD_SONG = "playlistAddSong"
+        const val PLAYLIST_REMOVE_SONG = "playlistRemoveSong"
+        /** Returns `List<Map>` of songs: local reads JSON; YouTube Music loads via authenticated browse. */
+        const val PLAYLIST_FETCH_SONGS = "playlistFetchSongs"
+        const val SET_PLAYBACK_SPEED = "setPlaybackSpeed"
         const val LYRICS = "lyrics"
         const val SKIP_TO_QUEUE_INDEX = "skipToQueueIndex"
         const val REMOVE_FROM_QUEUE = "removeFromQueue"
@@ -47,7 +55,12 @@ object FoxyFlutterChannels {
         const val CHECK_GITHUB_RELEASE = "checkGitHubRelease"
         const val OPEN_SYSTEM_EQUALIZER = "openSystemEqualizer"
         const val OPEN_WEB_LOGIN = "openWebLogin"
+        const val ACCOUNT_SIGN_OUT = "accountSignOut"
         const val OPEN_EXTERNAL_URL = "openExternalUrl"
+        /** Minimize app instead of finishing when Flutter handles the Android back gesture at root. */
+        const val MOVE_TASK_TO_BACK = "moveTaskToBack"
+        /** One-shot snapshot of the same map as [Events.PLAYER_STATE] `state` (for Flutter UI seeding). */
+        const val GET_PLAYER_STATE = "getPlayerState"
     }
 
     /**
@@ -61,7 +74,15 @@ object FoxyFlutterChannels {
      */
     object Events {
         const val PLAYER_STATE = "playerState"
+        /** Emitted after [Methods.SET_APPEARANCE] so Flutter can reload [Methods.GET_APPEARANCE]. */
+        const val APPEARANCE_CHANGED = "appearanceChanged"
         const val SLEEP_TIMER = "sleepTimerState"
+        const val LIBRARY_DOWNLOAD_PROGRESS = "libraryDownloadProgress"
+        const val LIBRARY_DOWNLOADS_CHANGED = "libraryDownloadsChanged"
+        /** User playlists or curated library slices changed — Flutter should reload [Methods.LIBRARY_FEED]. */
+        const val LIBRARY_FEED_CHANGED = "libraryFeedChanged"
+        /** YouTube Music web session saved or cleared — Flutter should reload [Methods.ACCOUNT_INFO]. */
+        const val ACCOUNT_CHANGED = "accountChanged"
         const val TOAST = "toast"
         const val ERROR = "error"
     }

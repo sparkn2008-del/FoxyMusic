@@ -2,9 +2,11 @@ package com.foxymusic
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.app.TaskStackBuilder
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -14,7 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackParameters
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -29,10 +31,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.random.Random
-import java.io.File
 
 enum class SleepTimerMode { Off, AfterMinutes, AfterCurrentTrack }
 
@@ -85,6 +87,7 @@ object MusicPlayer {
     /** Load persisted queue metadata (no automatic playback until the user presses play). */
     fun init(context: Context) {
         appContext = context.applicationContext
+        FoxyDynamicTheme.bindContext(context.applicationContext)
         restorePersistedSession(context.applicationContext)
     }
 
@@ -253,21 +256,69 @@ object MusicPlayer {
     val mediaSession: MediaSession?
         get() = mediaSessionHolder
 
-    fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0) {
+    /**
+     * Pushes queue + "now playing" to [state] on the current thread so Flutter's
+     * `getPlayerState` (called right after `playQueue` / `play` returns) already sees the new track.
+     * Heavy work (radio fetch, stream URL) still runs inside [playPrepared] on the coroutine.
+     */
+    private fun publishInstantPlaybackUi(song: Song) {
+        retryAttemptsForCurrent = 0
+        _state.value = _state.value.copy(
+            currentSong = song,
+            isBuffering = true,
+            isPlaying = false,
+            error = null,
+            durationMs = 0L,
+            positionMs = 0L,
+            bufferedFraction = 0f,
+            queue = queue,
+            queueIndex = queueIndex,
+            shuffleEnabled = shuffleEnabled,
+            repeatMode = repeatMode
+        )
+    }
+
+    fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0, radioTail: Boolean = false) {
         if (songs.isEmpty()) return
-        scope.launch {
+        appContext = context.applicationContext
+        val ctx = context.applicationContext
+        if (radioTail) {
+            val idx = startIndex.coerceIn(0, songs.lastIndex)
+            val seed = songs[idx]
+            queue = listOf(seed)
+            queueIndex = 0
+            publishInstantPlaybackUi(seed)
+            scope.launch {
+                val radio = withContext(Dispatchers.IO) {
+                    runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+                }
+                queue = (listOf(seed) + radio).distinctBy { it.videoId }
+                queueIndex = 0
+                _state.update {
+                    it.copy(queue = queue, queueIndex = queueIndex)
+                }
+                playPrepared(ctx, seed)
+            }
+        } else {
             queue = songs.distinctBy { it.videoId }
             queueIndex = startIndex.coerceIn(0, queue.lastIndex)
-            playPrepared(context.applicationContext, queue[queueIndex])
+            publishInstantPlaybackUi(queue[queueIndex])
+            scope.launch {
+                playPrepared(ctx, queue[queueIndex])
+            }
         }
     }
 
     fun play(context: Context, song: Song) {
+        appContext = context.applicationContext
+        if (queue.none { it.videoId == song.videoId }) {
+            queue = listOf(song)
+            queueIndex = 0
+        } else {
+            queueIndex = queue.indexOfFirst { it.videoId == song.videoId }
+        }
+        publishInstantPlaybackUi(song)
         scope.launch {
-            if (queue.none { it.videoId == song.videoId }) {
-                queue = listOf(song)
-                queueIndex = 0
-            }
             playPrepared(context.applicationContext, song)
         }
     }
@@ -275,6 +326,25 @@ object MusicPlayer {
     fun play(context: Context, url: String, song: Song) {
         scope.launch {
             playResolved(context.applicationContext, url, song)
+        }
+    }
+
+    private fun resolveOfflineMediaFile(context: Context, song: Song): File? {
+        song.localPath?.trim()?.takeIf { it.isNotBlank() }?.let { path ->
+            File(path).takeIf { it.isFile && it.length() > 0L }?.let { return it }
+        }
+        val vid = song.videoId.trim()
+        if (vid.isBlank()) return null
+        val dir = File(context.getExternalFilesDir(null), "downloads")
+        if (!dir.isDirectory) return null
+        val exts = setOf(
+            "webm", "mp4", "m4a", "opus", "mp3", "media", "mkv", "aac", "ogg",
+        )
+        return dir.listFiles()?.firstOrNull { f ->
+            f.isFile &&
+                f.nameWithoutExtension == vid &&
+                f.extension.lowercase() in exts &&
+                f.length() > 0L
         }
     }
 
@@ -302,15 +372,10 @@ object MusicPlayer {
                 repeatMode = repeatMode
             )
 
-        // Offline: if we have a local file, play it directly (no stream extraction).
-        val localPath = song.localPath
-        if (song.isDownloaded && !localPath.isNullOrBlank()) {
-            val f = File(localPath)
-            if (f.exists() && f.length() > 0L) {
-                val localUri = "file://${f.absolutePath}"
-                playResolved(context, localUri, song)
-                return
-            }
+        // Offline: play from disk when we can resolve a file (fast path — no StreamExtractor).
+        resolveOfflineMediaFile(context, song)?.let { file ->
+            playResolved(context, Uri.fromFile(file).toString(), song)
+            return
         }
 
         val result = withContext(Dispatchers.IO) {
@@ -323,6 +388,7 @@ object MusicPlayer {
 
     private fun playResolved(context: Context, url: String, song: Song) {
         appContext = context.applicationContext
+        FoxyDynamicTheme.bindContext(context.applicationContext)
         Log.d("FoxyMusic", "Attempting to play: ${song.title}")
         Log.d("FoxyMusic", "Stream URL: $url")
         Log.d("FoxyMusic", "Artwork candidates: ${song.artworkCandidates().joinToString()}")
@@ -350,9 +416,14 @@ object MusicPlayer {
                     .setUserAgent(StreamExtractor.STREAM_USER_AGENT)
                     .setDefaultRequestProperties(buildStreamHeaders())
 
+                val defaultDataSourceFactory = DefaultDataSource.Factory(
+                    context.applicationContext,
+                    upstreamFactory,
+                )
+
                 val cacheFactory = CacheDataSource.Factory()
                     .setCache(FoxyCache.get(context.applicationContext))
-                    .setUpstreamDataSourceFactory(upstreamFactory)
+                    .setUpstreamDataSourceFactory(defaultDataSourceFactory)
                     .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
                 val exo = ExoPlayer.Builder(context.applicationContext)
@@ -473,6 +544,22 @@ object MusicPlayer {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         publishDurationFromPlayer()
                     }
+
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        if (events.contains(Player.EVENT_TIMELINE_CHANGED) ||
+                            events.contains(Player.EVENT_TRACKS_CHANGED) ||
+                            events.contains(Player.EVENT_IS_LOADING_CHANGED)
+                        ) {
+                            publishDurationFromPlayer()
+                            _state.update {
+                                it.copy(
+                                    durationMs = player.duration.takeIf { duration ->
+                                        duration != C.TIME_UNSET && duration > 0
+                                    } ?: it.durationMs
+                                )
+                            }
+                        }
+                    }
                 })
             }
 
@@ -489,16 +576,20 @@ object MusicPlayer {
                 }
                 .setArtworkUri(song.highQualityArtworkUrl().takeIf { it.isNotBlank() }?.let(android.net.Uri::parse))
                 .build()
-            val mediaItem = MediaItem.Builder()
-                .setUri(url)
+            val itemBuilder = MediaItem.Builder()
+                .setUri(Uri.parse(url))
                 .setMediaId(song.videoId)
                 .setMediaMetadata(metadata)
-                .setMimeType(MimeTypeHint.fromUrl(url))
-                .build()
+            MimeTypeHint.fromUrl(url)?.let { itemBuilder.setMimeType(it) }
+            val mediaItem = itemBuilder.build()
             player?.setMediaItem(mediaItem)
             player?.prepare()
             player?.playWhenReady = true
-            loadSponsorSegments(song.videoId)
+            if (!url.startsWith("file:", ignoreCase = true)) {
+                loadSponsorSegments(song.videoId)
+            } else {
+                sponsorRangesMs = emptyList()
+            }
             applyVolumeCrossfade()
             startProgressTicker()
             persistPlaybackSnapshot()
@@ -513,14 +604,25 @@ object MusicPlayer {
 
     fun togglePlayPause() {
         scope.launch {
-            player?.let {
-                if (it.isPlaying) {
-                    it.pause()
-                    Log.d("FoxyMusic", "Paused")
-                } else {
-                    it.play()
-                    Log.d("FoxyMusic", "Resumed")
+            val ctx = appContext
+            val exo = player
+            if (exo == null) {
+                val song = _state.value.currentSong
+                    ?: queue.getOrNull(queueIndex.coerceAtLeast(0))
+                if (song == null || ctx == null) {
+                    Log.w("FoxyMusic", "togglePlayPause: no track loaded to restart")
+                    return@launch
                 }
+                Log.d("FoxyMusic", "Reloading unloaded player for ${song.title}")
+                playPrepared(ctx, song)
+                return@launch
+            }
+            if (exo.isPlaying) {
+                exo.pause()
+                Log.d("FoxyMusic", "Paused")
+            } else {
+                exo.play()
+                Log.d("FoxyMusic", "Resumed")
             }
         }
     }
@@ -551,6 +653,15 @@ object MusicPlayer {
         scope.launch {
             val context = appContext ?: return@launch
             if (queue.isEmpty()) return@launch
+            if (queue.size == 1) {
+                queueIndex = 0
+                player?.let { p ->
+                    p.seekTo(0L)
+                    p.playWhenReady = true
+                    p.play()
+                }
+                return@launch
+            }
             val nextIndex = when {
                 shuffleEnabled && queue.size > 1 -> {
                     generateSequence { Random.nextInt(queue.size) }
@@ -714,17 +825,27 @@ object MusicPlayer {
         startMediaSessionService(context.applicationContext)
     }
 
+    /**
+     * True when the queue / repeat rules allow a "next" action for the media notification.
+     * Single-item queues still get a Next control (restart from the top), matching common
+     * music-app behaviour and satisfying Media3's COMMAND_SEEK_TO_NEXT* checks.
+     */
     internal fun mediaNotificationHasNext(): Boolean {
         if (queue.isEmpty()) return false
+        if (queue.size == 1) return true
         if (shuffleEnabled && queue.size > 1) return true
         if (queueIndex + 1 <= queue.lastIndex) return true
-        return false
+        return repeatMode == RepeatMode.All
     }
 
     internal fun mediaNotificationHasPrevious(): Boolean = queue.isNotEmpty()
 
+    /** Advertise play/pause in MediaStyle whenever we have an active session / track. */
+    internal fun mediaSessionWantsTransportControls(): Boolean =
+        queue.isNotEmpty() || _state.value.currentSong != null
+
     internal fun playNextFromMediaSession() {
-        playNext(loop = false)
+        playNext(loop = repeatMode == RepeatMode.All)
     }
 
     internal fun playPreviousFromMediaSession() {
@@ -733,12 +854,21 @@ object MusicPlayer {
 
     private fun startMediaSessionService(context: Context) {
         val intent = Intent(context, FoxyMediaSessionService::class.java)
-        // Media3 owns foreground promotion for the media notification. Starting this
-        // as a foreground service ourselves can crash on OEM ROMs if the notification
-        // update is delayed: "Context.startForegroundService() did not then call
-        // Service.startForeground()". A regular start keeps the session alive while
-        // Media3 publishes transport controls.
-        context.startService(intent)
+        // Media3 posts the media notification and promotes this service to foreground.
+        // On API 26+, prefer startForegroundService so Android 12–14 reliably show the
+        // media player in the shade when playback begins from the foreground activity.
+        // If the system rejects FGS start, fall back to startService (legacy path).
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                @Suppress("DEPRECATION")
+                context.startService(intent)
+            }
+        } catch (e: IllegalStateException) {
+            Log.w("MusicPlayer", "startForegroundService rejected; trying startService", e)
+            context.startService(intent)
+        }
     }
 
     private fun stopMediaSessionService() {
@@ -751,6 +881,19 @@ private fun buildStreamHeaders(): Map<String, String> = buildFoxyStreamHeaders()
 
 private object MimeTypeHint {
     fun fromUrl(url: String): String? {
+        if (url.startsWith("file:", ignoreCase = true)) {
+            val path = runCatching { Uri.parse(url).path }.getOrNull().orEmpty()
+            if (path.isBlank()) return null
+            return when (path.substringAfterLast('.', "").lowercase()) {
+                "webm" -> MimeTypes.AUDIO_WEBM
+                "mp4", "m4a" -> MimeTypes.AUDIO_MP4
+                "opus" -> "audio/opus"
+                "mp3", "mpeg" -> MimeTypes.AUDIO_MPEG
+                "aac" -> MimeTypes.AUDIO_AAC
+                "ogg" -> MimeTypes.AUDIO_OGG
+                else -> null
+            }
+        }
         return when {
             url.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
             url.contains(".webm", ignoreCase = true) -> MimeTypes.AUDIO_WEBM

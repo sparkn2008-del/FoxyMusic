@@ -17,6 +17,14 @@ class FoxyQueueForwardingPlayer(delegate: Player) : ForwardingPlayer(delegate) {
     override fun getAvailableCommands(): Player.Commands {
         val base = super.getAvailableCommands()
         val builder = Player.Commands.Builder().addAll(base)
+        // Media3's DefaultMediaNotificationProvider only adds prev / play-pause / next actions when
+        // these commands are advertised. ExoPlayer can omit COMMAND_PLAY_PAUSE in some states;
+        // the in-app queue is always single-item on the delegate, so we merge explicitly.
+        if (MusicPlayer.mediaSessionWantsTransportControls() &&
+            !base.contains(Player.COMMAND_PLAY_PAUSE)
+        ) {
+            builder.add(Player.COMMAND_PLAY_PAUSE)
+        }
         if (MusicPlayer.mediaNotificationHasNext()) {
             builder.add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
             builder.add(Player.COMMAND_SEEK_TO_NEXT)
@@ -30,6 +38,9 @@ class FoxyQueueForwardingPlayer(delegate: Player) : ForwardingPlayer(delegate) {
 
     override fun isCommandAvailable(command: Int): Boolean =
         when (command) {
+            Player.COMMAND_PLAY_PAUSE ->
+                MusicPlayer.mediaSessionWantsTransportControls() ||
+                    super.isCommandAvailable(command)
             Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
             Player.COMMAND_SEEK_TO_NEXT ->
                 MusicPlayer.mediaNotificationHasNext() || super.isCommandAvailable(command)

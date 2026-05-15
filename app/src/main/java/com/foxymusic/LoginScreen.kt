@@ -102,6 +102,7 @@ fun LoginScreen(onBack: () -> Unit = {}) {
                 val cookie = detectedCookie
                 if (!cookie.isNullOrBlank()) {
                     FoxyAccount.updateSession(cookie)
+                    FoxyFlutterBridge.notifyAccountSessionUpdated()
                 }
                 onBack()
             },

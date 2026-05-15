@@ -18,6 +18,8 @@ data class FoxyCustomization(
     val gridColumns: Int = 2,
     val showBottomLabels: Boolean = true,
     val playerProgressStyle: Int = 2,
+    /** 0 = static, 1 = subtle thumb pulse, 2 = soft played-segment shimmer (full player seek bar). */
+    val playerSeekMotion: Int = 0,
     /** Restore last queue and transport state after the app restarts. */
     val persistentQueue: Boolean = true,
     /** Default accent: YouTube Music–style red. */
@@ -81,6 +83,7 @@ object FoxySettings {
     private const val GRID_COLUMNS = "grid_columns"
     private const val BOTTOM_LABELS = "bottom_labels"
     private const val PLAYER_PROGRESS_STYLE = "player_progress_style"
+    private const val PLAYER_SEEK_MOTION = "player_seek_motion"
     private const val PERSISTENT_QUEUE = "persistent_queue"
     private const val ACCENT = "accent"
     private const val SPONSOR_BLOCK = "sponsor_block"
@@ -115,6 +118,7 @@ object FoxySettings {
             gridColumns = prefs.getInt(GRID_COLUMNS, 2).coerceIn(2, 4),
             showBottomLabels = prefs.getBoolean(BOTTOM_LABELS, true),
             playerProgressStyle = prefs.getInt(PLAYER_PROGRESS_STYLE, 2).coerceIn(0, 3),
+            playerSeekMotion = prefs.getInt(PLAYER_SEEK_MOTION, 0).coerceIn(0, 2),
             persistentQueue = prefs.getBoolean(PERSISTENT_QUEUE, true),
             accentArgb = prefs.getInt(ACCENT, 0xFFFF1744.toInt()),
             sponsorBlockEnabled = prefs.getBoolean(SPONSOR_BLOCK, true),
@@ -155,6 +159,7 @@ object FoxySettings {
             ?.putInt(GRID_COLUMNS, next.gridColumns)
             ?.putBoolean(BOTTOM_LABELS, next.showBottomLabels)
             ?.putInt(PLAYER_PROGRESS_STYLE, next.playerProgressStyle.coerceIn(0, 3))
+            ?.putInt(PLAYER_SEEK_MOTION, next.playerSeekMotion.coerceIn(0, 2))
             ?.putBoolean(PERSISTENT_QUEUE, next.persistentQueue)
             ?.putInt(ACCENT, next.accentArgb)
             ?.putBoolean(SPONSOR_BLOCK, next.sponsorBlockEnabled)

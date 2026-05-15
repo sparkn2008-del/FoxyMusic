@@ -10,6 +10,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLDecoder
+import java.util.LinkedHashMap
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 data class RecommendationSection(
@@ -101,13 +103,41 @@ object YTMusicApi {
 
     suspend fun videos(query: String): List<Song> = search(query, filterVideos)
 
+    /**
+     * YouTube Music–style station: prefer **genre / mood** discovery over the literal
+     * `"title artist radio"` search (which floods the queue with the same upload under many names).
+     * Uses [next] for official “up next” suggestions, but filters near-duplicate titles and blends
+     * broad station queries (phonk, slowed, artist radio, etc.).
+     */
     suspend fun radio(seed: Song): List<Song> {
-        val nextSongs = next(seed.videoId).filterNot { it.videoId == seed.videoId }
-        if (nextSongs.isNotEmpty()) return nextSongs.take(50)
+        val out = LinkedHashMap<String, Song>()
+        fun put(s: Song) {
+            if (s.videoId == seed.videoId) return
+            if (isLikelySameTrackDifferentUpload(s, seed)) return
+            out.putIfAbsent(s.videoId, s)
+        }
 
-        return search("${seed.title} ${seed.artist} radio")
-            .filterNot { it.videoId == seed.videoId }
-            .take(50)
+        // 1) Broad station searches first so the queue is not 40× the same keyword hit.
+        for (q in stationSearchQueries(seed)) {
+            if (out.size >= 56) break
+            search(q).forEach(::put)
+        }
+
+        // 2) Innertube “next” panel — often good, but can be remix-heavy; filter + merge.
+        next(seed.videoId).forEach(::put)
+
+        // 3) Last-resort: artist-scoped radio (still not the literal full title string).
+        if (out.size < 14) {
+            val a = seed.artist.substringBefore("feat.").substringBefore("ft.").trim()
+            if (a.isNotBlank() &&
+                !a.equals("YouTube Music", ignoreCase = true) &&
+                !a.equals("Unknown artist", ignoreCase = true)
+            ) {
+                search("$a music mix").forEach(::put)
+            }
+        }
+
+        return out.values.take(50)
     }
 
     suspend fun next(videoId: String): List<Song> {
@@ -339,4 +369,114 @@ object YTMusicApi {
             }
         }
     }
+
+    // --- Smart radio / station (genre + dedupe) ---
+
+    private fun stationSearchQueries(seed: Song): List<String> {
+        val title = seed.title
+        val artist = seed.artist.trim()
+        val blob = "${title.lowercase(Locale.US)} ${artist.lowercase(Locale.US)}"
+        val q = ArrayList<String>()
+
+        fun add(s: String) {
+            val t = s.trim()
+            if (t.isNotBlank() && !q.contains(t)) q.add(t)
+        }
+
+        val hasPhonk = blob.contains("phonk")
+        val hasDrift = blob.contains("drift") || blob.contains("drift phonk")
+        val hasBrazilFunk = blob.contains("brazilian") && blob.contains("funk") ||
+            blob.contains("brazil funk") || blob.contains("funk brasileiro")
+        val slowedOrReverb = blob.contains("slowed") || blob.contains("reverb") ||
+            blob.contains("nightcore") || blob.contains("bass boosted")
+        val lofi = blob.contains("lofi") || blob.contains("lo-fi") || blob.contains("chill hop")
+        val bollywood = blob.contains("bollywood") || blob.contains("hindi") ||
+            blob.contains("desi") || blob.contains("punjabi")
+
+        when {
+            hasPhonk || hasDrift -> {
+                add("phonk drift mix")
+                add("dark phonk slowed reverb")
+                add("phonk type beat mix")
+            }
+            hasBrazilFunk -> {
+                add("brazilian funk mix 2024")
+                add("funk brasileiro hits")
+            }
+            bollywood -> {
+                add("bollywood hits mix 2024")
+                add("hindi romantic songs mix")
+            }
+            lofi -> {
+                add("chill lofi beats mix")
+                add("lofi hip hop radio beats")
+            }
+            slowedOrReverb && !lofi -> {
+                // Short “LUZ ROJA (Slowed)”-style edits are usually drift / phonk adjacent on YTM.
+                add("phonk slowed mix")
+                add("slowed reverb drift mix")
+                add("dark slowed songs mix")
+            }
+        }
+
+        val shortArtist = artist
+            .substringBefore("feat.")
+            .substringBefore("ft.")
+            .trim()
+            .removeSuffix(",")
+            .trim()
+        if (shortArtist.isNotBlank() &&
+            shortArtist.length > 1 &&
+            !shortArtist.equals("YouTube Music", ignoreCase = true) &&
+            !shortArtist.equals("Unknown artist", ignoreCase = true)
+        ) {
+            add("$shortArtist best songs")
+            add("$shortArtist mix")
+        }
+
+        // Broad tail so the station never collapses to one keyword.
+        add("trending songs mix")
+
+        return q
+    }
+
+    private fun normalizeTrackTitleKey(raw: String): String {
+        var t = raw.lowercase(Locale.US)
+        t = t.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ")
+        val noise = listOf(
+            "slowed", "reverb", "speed", "sped", "tiktok", "version", "remix", "edit",
+            "official", "video", "audio", "full", "hd", "4k", "visualizer", "lyrics",
+            "music video", "mv", "hq", "clean", "explicit"
+        )
+        for (w in noise) {
+            t = t.replace(w, " ")
+        }
+        t = t.replace(Regex("[^a-z0-9áéíóúñü]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+        return t
+    }
+
+    /** Drops uploads that are obviously the same track / stem with a suffix tweak. */
+    private fun isLikelySameTrackDifferentUpload(candidate: Song, seed: Song): Boolean {
+        val a = normalizeTrackTitleKey(candidate.title)
+        val b = normalizeTrackTitleKey(seed.title)
+        if (a.isBlank() || b.isBlank()) return false
+        if (a == b) return true
+        if (a.length > 10 && b.length > 10) {
+            if (a.contains(b) || b.contains(a)) {
+                val ratio = minOf(a.length, b.length).toDouble() / maxOf(a.length, b.length)
+                if (ratio > 0.72) return true
+            }
+        }
+        val ta = a.split(' ').filter { it.length > 2 }.toSet()
+        val tb = b.split(' ').filter { it.length > 2 }.toSet()
+        if (ta.isEmpty() || tb.isEmpty()) return false
+        val inter = ta.intersect(tb).size
+        val union = ta.union(tb).size
+        return inter.toDouble() / union > 0.82
+    }
+
+    /** Exposed for authenticated browse responses that share the same renderer tree shape. */
+    internal fun songsFromBrowseJson(root: JSONObject): List<Song> = parseSongs(root)
 }

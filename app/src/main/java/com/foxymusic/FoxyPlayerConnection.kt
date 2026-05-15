@@ -16,8 +16,8 @@ object FoxyPlayerConnection {
 
     fun init(context: Context) = MusicPlayer.init(context)
 
-    fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0) =
-        MusicPlayer.playQueue(context, songs, startIndex)
+    fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0, radioTail: Boolean = false) =
+        MusicPlayer.playQueue(context, songs, startIndex, radioTail)
 
     fun play(context: Context, song: Song) = MusicPlayer.play(context, song)
     fun play(context: Context, url: String, song: Song) = MusicPlayer.play(context, url, song)
