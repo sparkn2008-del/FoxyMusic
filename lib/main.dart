@@ -5551,11 +5551,8 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                 final maxW = c.maxWidth;
                                 final maxH = c.maxHeight;
                                 final artSide = math.min(
-                                  (maxW - 24) * 0.82,
-                                  math.min(
-                                    300.0,
-                                    math.max(180.0, maxH * 0.34),
-                                  ),
+                                  maxW * 0.90,
+                                  math.max(300.0, maxH * 0.48),
                                 );
                                 return Column(
                                   crossAxisAlignment:
@@ -5567,15 +5564,16 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                         physics:
                                             const AlwaysScrollableScrollPhysics(),
                                         padding:
-                                            const EdgeInsets.only(bottom: 8),
+                                            const EdgeInsets.only(bottom: 24),
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
+                                            horizontal: 16,
                                           ),
                                           child: Column(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.stretch,
                                             children: [
+                                             const SizedBox(height: 24),
                                               Column(
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.center,
@@ -5595,7 +5593,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                       letterSpacing: 1.2,
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 6),
+                                                  const SizedBox(height: 16),
                                                   Padding(
                                                     padding: const EdgeInsets
                                                         .symmetric(
@@ -5621,7 +5619,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   ),
                                                 ],
                                               ),
-                                              const SizedBox(height: 12),
+                                              const SizedBox(height: 40),
                                               Center(
                                                 child: GestureDetector(
                                                   onHorizontalDragUpdate:
@@ -5651,6 +5649,10 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                     offlineArtworkPath: song
                                                         .offlineArtworkPath,
                                                     maxSide: artSide,
+                                                    fit: BoxFit.cover,                    // ← Add this
+                                                    filterQuality: FilterQuality.high,    // ← Add this
+                                                    cacheWidth: (artSide * 2).toInt(),    // ← Higher resolution cache
+                                                    cacheHeight: (artSide * 2).toInt(),
                                                   ),
                                                 ),
                                               ),
@@ -5872,6 +5874,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                 style: 0,
                                                 motion: _seekMotion,
                                                 accent: accent,
+                                                height: 6,
                                                 onSeek: (value) => _method
                                                     .invokeMethod('seekTo', {
                                                   'positionMs': (effectiveDurMs *
@@ -5942,9 +5945,9 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                         ),
                                       ),
                                       child: Padding(
-                                        padding: EdgeInsets.only(
+                                        padding: const EdgeInsets.only(
                                           top: 4,
-                                          bottom: padBottom > 0 ? 2 : 6,
+                                          bottom: 8,
                                         ),
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
