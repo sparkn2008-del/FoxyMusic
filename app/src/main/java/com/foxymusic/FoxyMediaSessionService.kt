@@ -184,9 +184,13 @@ class FoxyMediaSessionService : MediaSessionService() {
             b.setLargeIcon(largeIcon)
         }
 
-        val session = MusicPlayer.mediaSession
+                val session = MusicPlayer.mediaSession
         if (session != null) {
-            b.setStyle(MediaStyleNotificationHelper.MediaStyle(session))
+            b.setStyle(
+                MediaStyleNotificationHelper.MediaStyle(session)
+                    .setShowActionsInCompactView(0, 1, 2)   // Show Prev, Play/Pause, Next
+                    .setShowCancelButton(true)
+            )
         }
 
         if (ui.durationMs > 500 && !ui.isBuffering) {
