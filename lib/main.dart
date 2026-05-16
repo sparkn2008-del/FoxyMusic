@@ -8961,7 +8961,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                 padding:
                                                     const EdgeInsets.fromLTRB(
                                                   6,
-                                                  2,
+                                                  0,
                                                   6,
                                                   0,
                                                 ),
@@ -8999,7 +8999,6 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   ],
                                                 ),
                                               ),
-                                              const SizedBox(height: 10),
                                               _SimpMusicPlayerControlLayout(
                                                 shuffle: shuffle,
                                                 repeatMode: repeat,
@@ -9008,12 +9007,13 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                 prevEnabled: prevEnabled,
                                                 nextEnabled: nextEnabled,
                                               ),
-                                              Padding(
+                                              Transform.translate(
+                                                offset: const Offset(0, -6),
+                                                child: Padding(
                                                 padding: EdgeInsets.only(
-                                                  top: 14,
                                                   bottom: padBottom > 0
-                                                      ? 4
-                                                      : 12,
+                                                      ? 2
+                                                      : 8,
                                                 ),
                                                 child: Row(
                                                   mainAxisAlignment:
@@ -9064,6 +9064,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                     ),
                                                   ],
                                                 ),
+                                              ),
                                               ),
                                             ],
                                           ),
@@ -9493,8 +9494,9 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
     final repeatOn = repeatMode != 'Off';
+    final whiteOn = Colors.white.withValues(alpha: 0.95);
+    final whiteOff = Colors.white.withValues(alpha: 0.55);
 
     Widget slot(Widget child) => Expanded(child: Center(child: child));
 
@@ -9515,7 +9517,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
     }
 
     Widget mainPlay() {
-      const playSize = 140.0;
+      const playSize = 183.0;
       return slot(
         Material(
           color: Colors.white.withValues(alpha: 0.96),
@@ -9532,8 +9534,8 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
               child: buffering
                   ? const Center(
                       child: SizedBox(
-                        width: 48,
-                        height: 48,
+                        width: 58,
+                        height: 58,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.5,
                           color: Colors.black38,
@@ -9544,7 +9546,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
                       playing
                           ? Icons.pause_rounded
                           : Icons.play_arrow_rounded,
-                      size: playing ? 64 : 68,
+                      size: playing ? 82 : 86,
                       color: Colors.black87,
                     ),
             ),
@@ -9554,7 +9556,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
     }
 
     return SizedBox(
-      height: 140,
+      height: 183,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2),
         child: Row(
@@ -9565,7 +9567,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
                 icon: Icon(
                   Icons.shuffle_rounded,
                   size: 30,
-                  color: shuffle ? accent : Colors.white.withValues(alpha: 0.9),
+                  color: shuffle ? whiteOn : whiteOff,
                 ),
               ),
             ),
@@ -9576,7 +9578,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
                     : null,
                 icon: Icon(
                   Icons.skip_previous_rounded,
-                  size: 40,
+                  size: 50,
                   color: prevEnabled
                       ? Colors.white.withValues(alpha: 0.95)
                       : Colors.white30,
@@ -9591,7 +9593,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
                     : null,
                 icon: Icon(
                   Icons.skip_next_rounded,
-                  size: 40,
+                  size: 50,
                   color: nextEnabled
                       ? Colors.white.withValues(alpha: 0.95)
                       : Colors.white30,
@@ -9606,7 +9608,7 @@ class _SimpMusicPlayerControlLayout extends StatelessWidget {
                       ? Icons.repeat_one_rounded
                       : Icons.repeat_rounded,
                   size: 30,
-                  color: repeatOn ? accent : Colors.white.withValues(alpha: 0.9),
+                  color: repeatOn ? whiteOn : whiteOff,
                 ),
               ),
             ),
