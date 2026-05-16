@@ -1,42 +1,22 @@
-# Gradle and Android build output
-.gradle/
+# Local Gradle homes / caches (large; do not commit)
+.gradle-user-home/
+.gradle-user-home*/
+.gradle-agent-home/
+.gradle-agent-home*/
+.gradle-build-isolated/
+
+# Build output & HTML reports (Gradle problems-report, etc. — not app source)
 build/
-**/build/
-**/.gradle/
+*.html
 
-# Local machine config
-local.properties
+# Extracted reference trees (not part of FoxyMusic)
+_simp_extract/
 
-# IDE files
-.idea/
-*.iml
+# Release signing (never commit)
+key.properties
+*.jks
+*.keystore
 
-# Generated APKs and bundles
-*.apk
-*.aab
-
-# Logs and temporary files
-*.log
-*.tmp
-*.temp
-
-# Local screenshots / scratch images
-adb-screen.png
-foxy-screen.png
-
-# Local reference/study copy
+# Third-party reference trees (not part of FoxyMusic)
 .metrolist-study/
-
-# Build outputs
-build/
-**/build/
-
-# Flutter
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-pubspec.lock   # (optional - some keep it)
-
-# Gradle
-.gradle/
-*.log
+.reference-SimpMusic-zip/
