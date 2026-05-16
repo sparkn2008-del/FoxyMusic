@@ -129,16 +129,49 @@ object FoxyLibraryStore {
      */
     suspend fun refreshDownloadsFromDisk(context: Context) {
         publish { it.copy(isLoading = true) }
+        val previous = state.value.downloadedSongs
         val downloaded = withContext(Dispatchers.IO) {
             val downloadsDir = downloadsRoot(context)
-            if (!downloadsDir.exists()) {
+            val fromMedia = if (!downloadsDir.exists()) {
                 emptyList()
             } else {
                 downloadsDir.listFiles()
                     ?.mapNotNull { file -> songFromDownloadedFile(context, file) }
-                    ?.distinctBy { it.videoId }
                     ?: emptyList()
             }
+            val fromMetaOnly = if (!downloadsDir.exists()) {
+                emptyList()
+            } else {
+                downloadsDir.listFiles()
+                    ?.filter { it.isFile && it.name.endsWith(".foxy-meta.json") }
+                    ?.mapNotNull { file ->
+                        val videoId = file.name.removeSuffix(".foxy-meta.json")
+                        if (videoId.isBlank()) return@mapNotNull null
+                        val meta = FoxyOfflineBundle.readMeta(context, videoId)
+                            ?: return@mapNotNull null
+                        if (!meta.optBoolean("hlsOffline", false)) return@mapNotNull null
+                        if (fromMedia.any { it.videoId == videoId }) return@mapNotNull null
+                        Song(
+                            videoId = videoId,
+                            title = meta.optString("title").ifBlank { "Offline track" },
+                            artist = meta.optString("artist").ifBlank { "Unknown artist" },
+                            thumbnail = meta.optString("localArtPath")
+                                .takeIf { it.isNotBlank() }
+                                ?: meta.optString("thumbnail"),
+                            duration = meta.optString("duration").takeIf { it.isNotBlank() },
+                            album = meta.optString("album").takeIf { it.isNotBlank() },
+                            isDownloaded = true,
+                            streamUrl = meta.optString("streamUrl").takeIf { it.isNotBlank() },
+                            artworkUrl = meta.optString("localArtPath")
+                                .takeIf { it.isNotBlank() }
+                                ?: meta.optString("artworkUrl").takeIf { it.isNotBlank() },
+                        )
+                    }
+                    ?: emptyList()
+            }
+            (fromMedia + fromMetaOnly + previous.filter { prev ->
+                prev.isDownloaded && fromMedia.none { it.videoId == prev.videoId }
+            }).distinctBy { it.videoId }
         }
         publish {
             it.copy(
@@ -177,11 +210,11 @@ object FoxyLibraryStore {
         }
     }
 
-    fun markAsDownloaded(song: Song, localPath: String) {
+    fun markAsDownloaded(song: Song, localPath: String?) {
         val updatedSong = song.copy(
-            localPath = localPath,
+            localPath = localPath?.takeIf { it.isNotBlank() },
             isDownloaded = true,
-            streamUrl = null
+            streamUrl = song.streamUrl,
         )
         publish { current ->
             val newAllSongs = current.allSongs.map {
@@ -244,16 +277,21 @@ object FoxyLibraryStore {
         if (!f.exists() || f.length() <= 0L) return null
         return try {
             val json = JSONObject(f.readText())
+            val diskArt = FoxyOfflineBundle.offlineArtworkPath(context, videoId)
+                ?: json.optString("localArtPath").takeIf { it.isNotBlank() }
             Song(
                 videoId = json.optString("videoId", videoId),
                 title = json.optString("title").ifBlank { "Offline track" },
                 artist = json.optString("artist").ifBlank { "Unknown artist" },
-                thumbnail = json.optString("thumbnail"),
+                thumbnail = diskArt
+                    ?: json.optString("thumbnail"),
                 duration = json.optString("duration").takeIf { it.isNotBlank() },
                 album = json.optString("album").takeIf { it.isNotBlank() },
-                localPath = null,
+                localPath = json.optString("localPath").takeIf { it.isNotBlank() },
                 isDownloaded = true,
-                artworkUrl = json.optString("artworkUrl").takeIf { it.isNotBlank() }
+                artworkUrl = diskArt
+                    ?: json.optString("artworkUrl").takeIf { it.isNotBlank() },
+                streamUrl = json.optString("streamUrl").takeIf { it.isNotBlank() },
             )
         } catch (_: Exception) {
             null

@@ -17,12 +17,9 @@ class FoxyQueueForwardingPlayer(delegate: Player) : ForwardingPlayer(delegate) {
     override fun getAvailableCommands(): Player.Commands {
         val base = super.getAvailableCommands()
         val builder = Player.Commands.Builder().addAll(base)
-        // Media3's DefaultMediaNotificationProvider only adds prev / play-pause / next actions when
-        // these commands are advertised. ExoPlayer can omit COMMAND_PLAY_PAUSE in some states;
-        // the in-app queue is always single-item on the delegate, so we merge explicitly.
-        if (MusicPlayer.mediaSessionWantsTransportControls() &&
-            !base.contains(Player.COMMAND_PLAY_PAUSE)
-        ) {
+        // Media3 notification actions on Android 12+ require these commands on the session player.
+        // ExoPlayer often omits PLAY_PAUSE while buffering — always merge for the shade widget.
+        if (MusicPlayer.mediaSessionWantsTransportControls()) {
             builder.add(Player.COMMAND_PLAY_PAUSE)
         }
         if (MusicPlayer.mediaNotificationHasNext()) {

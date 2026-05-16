@@ -186,11 +186,53 @@ object FoxyMedia3Downloads {
 
                             val ctx = applicationContext ?: return
 
-                            scope.launch(Dispatchers.IO) {
+                            val metaBytes = download.request.data
 
-                                FoxyLibraryStore.refreshDownloadsFromDisk(ctx)
+                            val song = runCatching {
+
+                                val json = JSONObject(
+
+                                    String(metaBytes ?: ByteArray(0), StandardCharsets.UTF_8),
+
+                                )
+
+                                Song(
+
+                                    videoId = json.optString("videoId", id),
+
+                                    title = json.optString("title").ifBlank { "Offline track" },
+
+                                    artist = json.optString("artist").ifBlank { "Unknown artist" },
+
+                                    thumbnail = json.optString("thumbnail"),
+
+                                    duration = json.optString("duration").takeIf { it.isNotBlank() },
+
+                                    album = json.optString("album").takeIf { it.isNotBlank() },
+
+                                    artworkUrl = json.optString("artworkUrl").takeIf { it.isNotBlank() },
+
+                                )
+
+                            }.getOrElse {
+
+                                Song(
+
+                                    videoId = id,
+
+                                    title = "Offline track",
+
+                                    artist = "Unknown artist",
+
+                                    thumbnail = "",
+
+                                )
 
                             }
+
+                            val streamUrl = download.request.uri.toString()
+
+                            FoxyOfflineBundle.onHlsDownloadComplete(ctx, song, streamUrl)
 
                         }
 
@@ -293,6 +335,18 @@ object FoxyMedia3Downloads {
             /* foreground= */ false
 
         )
+
+    }
+
+
+
+    fun isCompleted(context: Context, videoId: String): Boolean {
+
+        ensureInitialized(context)
+
+        val d = downloadManager?.downloadIndex?.getDownload(videoId) ?: return false
+
+        return d.state == Download.STATE_COMPLETED
 
     }
 

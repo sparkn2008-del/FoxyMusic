@@ -2,7 +2,9 @@ package com.foxymusic
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.ForegroundServiceStartNotAllowedException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -44,6 +46,7 @@ class FoxyMediaSessionService : MediaSessionService() {
     private val artworkScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
+        instance = this
         ensurePlaybackNotificationChannel()
         // Call startForeground before MediaSessionService wiring so the window after
         // startForegroundService() is satisfied on strict OEMs (e.g. MIUI).
@@ -66,6 +69,7 @@ class FoxyMediaSessionService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
         artworkScope.cancel()
         super.onDestroy()
     }
@@ -107,6 +111,31 @@ class FoxyMediaSessionService : MediaSessionService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             createPlaybackChannel()
         }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ensurePlaybackNotificationChannel()
+        // Every startForegroundService() must call startForeground() promptly; Media3's
+        // onUpdateNotification can be delayed by scheduleNotificationRefresh posts.
+        runCatching { promoteToForeground("onStartCommand") }
+        if (intent?.action == ACTION_REFRESH_NOTIFICATION) {
+            scheduleNotificationRefresh()
+            maybeEnqueueArtworkForPlaceholder(
+                DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID,
+            )
+            return START_STICKY
+        }
+        if (intent?.action == ACTION_MEDIA_COMMAND) {
+            when (intent.getIntExtra(EXTRA_PLAYER_COMMAND, -1)) {
+                Player.COMMAND_PLAY_PAUSE -> MusicPlayer.togglePlayPause()
+                Player.COMMAND_SEEK_TO_NEXT -> MusicPlayer.playNextFromMediaSession()
+                Player.COMMAND_SEEK_TO_PREVIOUS -> MusicPlayer.playPreviousFromMediaSession()
+            }
+            scheduleNotificationRefresh()
+            return START_STICKY
+        }
+        scheduleNotificationRefresh()
+        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -184,12 +213,13 @@ class FoxyMediaSessionService : MediaSessionService() {
             b.setLargeIcon(largeIcon)
         }
 
-                val session = MusicPlayer.mediaSession
+        val session = MusicPlayer.mediaSession
         if (session != null) {
+            attachMediaTransportActions(b, session)
             b.setStyle(
                 MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(0, 1, 2)   // Show Prev, Play/Pause, Next
-                    .setShowCancelButton(true)
+                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowCancelButton(true),
             )
         }
 
@@ -209,6 +239,42 @@ class FoxyMediaSessionService : MediaSessionService() {
         return b.build()
     }
 
+    private fun attachMediaTransportActions(
+        builder: NotificationCompat.Builder,
+        session: MediaSession,
+    ) {
+        val player = session.player
+        val commands = player.availableCommands
+        fun addAction(command: Int, iconRes: Int, label: String) {
+            if (!commands.contains(command)) return
+            builder.addAction(
+                NotificationCompat.Action.Builder(
+                    iconRes,
+                    label,
+                    mediaCommandPendingIntent(command),
+                ).build(),
+            )
+        }
+        addAction(Player.COMMAND_SEEK_TO_PREVIOUS, R.drawable.ic_media_prev, "Previous")
+        val playPauseIcon =
+            if (player.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
+        addAction(Player.COMMAND_PLAY_PAUSE, playPauseIcon, "Play")
+        addAction(Player.COMMAND_SEEK_TO_NEXT, R.drawable.ic_media_next, "Next")
+    }
+
+    private fun mediaCommandPendingIntent(command: Int): PendingIntent {
+        val intent = Intent(this, FoxyMediaSessionService::class.java).apply {
+            action = ACTION_MEDIA_COMMAND
+            putExtra(EXTRA_PLAYER_COMMAND, command)
+        }
+        return PendingIntent.getService(
+            this,
+            command,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     private fun promoteToForeground(reason: String) {
         val notification = buildFallbackForegroundNotification()
         val nid = DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID
@@ -224,14 +290,29 @@ class FoxyMediaSessionService : MediaSessionService() {
 
     private fun maybeEnqueueArtworkForPlaceholder(notificationId: Int) {
         val song = MusicPlayer.state.value.currentSong ?: return
-        val url = song.highQualityArtworkUrl().trim()
-        if (url.isEmpty()) return
         artworkScope.launch {
-            val bmp = withContext(Dispatchers.IO) { decodeAlbumArt(url) } ?: return@launch
+            val bmp = withContext(Dispatchers.IO) { resolveNotificationArtwork(song) } ?: return@launch
             val nm = NotificationManagerCompat.from(this@FoxyMediaSessionService)
             nm.notify(notificationId, buildFallbackForegroundNotification(bmp))
         }
     }
+
+    private fun resolveNotificationArtwork(song: Song): Bitmap? {
+        val ctx = applicationContext
+        FoxyOfflineBundle.offlineArtworkPath(ctx, song.videoId)?.let { path ->
+            decodeAlbumArtFile(path)?.let { return it }
+        }
+        FoxyDynamicTheme.offlineArtworkPath.value?.let { path ->
+            decodeAlbumArtFile(path)?.let { return it }
+        }
+        val url = song.highQualityArtworkUrl().trim()
+        if (url.isEmpty()) return null
+        return decodeAlbumArt(url)
+    }
+
+    private fun decodeAlbumArtFile(path: String): Bitmap? = runCatching {
+        BitmapFactory.decodeFile(path)
+    }.getOrNull()
 
     private fun decodeAlbumArt(url: String): Bitmap? = runCatching {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -276,5 +357,30 @@ class FoxyMediaSessionService : MediaSessionService() {
     companion object {
         /** New channel id so IMPORTANCE_HIGH applies for users who had the old default channel. */
         const val PLAYBACK_CHANNEL_ID = "foxy_playback_media"
+        private const val ACTION_MEDIA_COMMAND = "com.foxymusic.action.MEDIA_COMMAND"
+        private const val ACTION_REFRESH_NOTIFICATION = "com.foxymusic.action.REFRESH_NOTIFICATION"
+        private const val EXTRA_PLAYER_COMMAND = "player_command"
+
+        @Volatile
+        private var instance: FoxyMediaSessionService? = null
+
+        /** Rebuild shade / lock-screen media card when the track changes. */
+        fun refreshPlaybackNotification(context: Context) {
+            val app = context.applicationContext
+            val svc = instance
+            if (svc != null) {
+                svc.mainHandler.post {
+                    svc.requestMediaNotificationRefresh()
+                    svc.maybeEnqueueArtworkForPlaceholder(
+                        DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID,
+                    )
+                }
+                return
+            }
+            val intent = Intent(app, FoxyMediaSessionService::class.java).apply {
+                action = ACTION_REFRESH_NOTIFICATION
+            }
+            runCatching { app.startService(intent) }
+        }
     }
 }

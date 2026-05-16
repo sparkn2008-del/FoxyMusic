@@ -47,6 +47,8 @@ object YTMusicApi {
 
     private const val filterSongs = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
     private const val filterVideos = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"
+    private const val filterAlbums = "EgWKAQIYAwodChADEAQQCRA%3D%3D"
+    private const val filterArtists = "EgWKAQIgAggKAghBcmNoZXN0"
 
     // ====================== PUBLIC API ======================
 
@@ -90,18 +92,50 @@ object YTMusicApi {
     }
 
     suspend fun getMoodMix(mood: String): List<Song> {
-        val query = when (mood.lowercase()) {
-            "energize", "workout" -> "energizing workout music"
-            "focus" -> "focus music"
-            "late night" -> "late night chill music"
-            "romance" -> "romantic songs"
-            "chill" -> "chill hits"
-            else -> "$mood music"
+        val query = when (mood.lowercase(Locale.US)) {
+            "energize", "workout" -> "energizing workout music mix"
+            "focus" -> "focus concentration music mix"
+            "late night" -> "late night chill lofi mix"
+            "romance" -> "romantic love songs mix"
+            "chill", "relax" -> "chill relaxing music mix"
+            "sleep" -> "sleep ambient calm music"
+            "sad" -> "sad emotional songs playlist"
+            "phonk" -> "phonk drift dark mix slowed"
+            "bollywood" -> "bollywood hits mix 2024"
+            "hindi" -> "hindi songs mix popular"
+            "punjabi" -> "punjabi hits mix bhangra"
+            "drift" -> "drift phonk car music mix"
+            "lofi" -> "lofi hip hop beats mix"
+            "jazz" -> "jazz cafe background music"
+            "rock" -> "rock hits mix"
+            "pop" -> "pop hits mix 2024"
+            "edm" -> "edm festival drops mix"
+            "k-pop", "kpop" -> "k-pop hits mix"
+            else -> "$mood music mix"
         }
         return search(query).take(40)
     }
 
     suspend fun videos(query: String): List<Song> = search(query, filterVideos)
+
+    /** SimpMusic-style categorized search (songs / videos / albums / artists). */
+    suspend fun searchAll(query: String, limitPerCategory: Int = 28): Map<String, List<Song>> {
+        if (query.isBlank()) {
+            return mapOf(
+                "songs" to emptyList(),
+                "videos" to emptyList(),
+                "albums" to emptyList(),
+                "artists" to emptyList(),
+            )
+        }
+        val cap = limitPerCategory.coerceIn(8, 40)
+        return mapOf(
+            "songs" to search(query, filterSongs).take(cap),
+            "videos" to search(query, filterVideos).take(cap),
+            "albums" to search(query, filterAlbums).take(cap),
+            "artists" to search(query, filterArtists).take(cap),
+        )
+    }
 
     /**
      * YouTube Music–style station: prefer **genre / mood** discovery over the literal

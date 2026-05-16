@@ -124,6 +124,7 @@ object FoxyDownloadManager {
                     streamUrl = null
                 )
                 FoxyLibraryStore.markAsDownloaded(finalSong, outFile.absolutePath)
+                FoxyOfflineBundle.onProgressiveDownloadComplete(appCtx, finalSong, outFile)
                 FoxyLibraryStore.clearDownloadProgress(song.videoId)
                 FoxyActiveDownloadNotifier.cancel(appCtx, song.videoId)
             } catch (e: Exception) {

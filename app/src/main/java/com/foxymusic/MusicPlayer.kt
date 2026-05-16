@@ -31,9 +31,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
-import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
 import kotlin.random.Random
 
 enum class SleepTimerMode { Off, AfterMinutes, AfterCurrentTrack }
@@ -78,6 +80,29 @@ object MusicPlayer {
     /** User-requested output level; combined with crossfade ramps. */
     private var userVolume = 1f
     private var sponsorRangesMs: List<Pair<Long, Long>> = emptyList()
+    /** Blocks overlapping track loads (next/prev/end-of-track races). */
+    private val playbackMutex = Mutex()
+    /**
+     * While true, [Player.STATE_ENDED] must not auto-advance — we call stop/replace during
+     * [playResolved] and that used to re-enter [playNext] and crash.
+     */
+    @Volatile
+    private var suppressEndAdvance = false
+    /** Paired with [suppressEndAdvance] so a delayed clear cannot unblock the wrong track swap. */
+    @Volatile
+    private var suppressEndAdvanceGeneration = 0
+    /** Avoid repeated [startForegroundService] on every skip — causes FGS timeout crashes. */
+    @Volatile
+    private var mediaSessionServiceStarted = false
+    /** Pre-resolved stream URL for the upcoming queue item (videoId to url). */
+    @Volatile
+    private var preloadedStream: Pair<String, String>? = null
+    private var preloadJob: Job? = null
+    /** Chronological play order for back (previous track), SimpMusic-style. */
+    private val playbackTimeline = mutableListOf<Song>()
+    private var playbackTimelineIndex = -1
+    @Volatile
+    private var suppressTimelineRecord = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state
@@ -177,21 +202,31 @@ object MusicPlayer {
                 }
                 applyVolumeCrossfade()
                 maybeSkipSponsor(pos)
-                delay(320)
+                delay(480)
             }
         }
     }
 
+    /** SimpMusic-style target level when normalization is enabled (reduces hot masters). */
+    private fun effectiveUserVolume(): Float {
+        var level = userVolume
+        if (FoxySettings.state.value.normalizeVolume) {
+            level *= 0.78f
+        }
+        return level.coerceIn(0f, 1f)
+    }
+
     private fun applyVolumeCrossfade() {
         val p = player ?: return
+        val base = effectiveUserVolume()
         val cross = FoxySettings.state.value.crossfadeMs
         if (cross <= 0) {
-            p.volume = userVolume
+            p.volume = base
             return
         }
         val rawDur = p.duration
         val dur = if (rawDur != C.TIME_UNSET && rawDur > 0L) rawDur else _state.value.durationMs.takeIf { it > 0L } ?: run {
-            p.volume = userVolume
+            p.volume = base
             return
         }
         val pos = p.currentPosition.coerceAtLeast(0L)
@@ -199,7 +234,12 @@ object MusicPlayer {
         val rem = (dur - pos).coerceAtLeast(0L)
         val fadeOut = if (rem < c) (rem.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
         val fadeIn = if (pos < c) (pos.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
-        p.volume = userVolume * minOf(fadeOut, fadeIn)
+        p.volume = base * minOf(fadeOut, fadeIn)
+    }
+
+    /** Re-apply crossfade / normalization after settings change while playing. */
+    fun refreshPlaybackAudioSettings() {
+        scope.launch { applyVolumeCrossfade() }
     }
 
     private fun maybeSkipSponsor(positionMs: Long) {
@@ -349,7 +389,32 @@ object MusicPlayer {
     }
 
     private suspend fun playPrepared(context: Context, song: Song) {
+        playbackMutex.withLock {
+            playPreparedLocked(context, song)
+        }
+    }
+
+    private fun recordPlaybackTimeline(song: Song) {
+        if (suppressTimelineRecord) return
+        val vid = song.videoId.trim()
+        if (vid.isEmpty()) return
+        if (playbackTimelineIndex in 0 until playbackTimeline.lastIndex) {
+            playbackTimeline.subList(playbackTimelineIndex + 1, playbackTimeline.size).clear()
+        }
+        val last = playbackTimeline.lastOrNull()
+        if (last?.videoId == vid) {
+            playbackTimelineIndex = playbackTimeline.lastIndex
+        } else {
+            playbackTimeline.add(song)
+            playbackTimelineIndex = playbackTimeline.lastIndex
+        }
+    }
+
+    private fun canPlayTimelinePrevious(): Boolean = playbackTimelineIndex > 0
+
+    private suspend fun playPreparedLocked(context: Context, song: Song) {
         appContext = context.applicationContext
+        recordPlaybackTimeline(song)
         if (queue.none { it.videoId == song.videoId }) {
             queue = listOf(song)
             queueIndex = 0
@@ -372,17 +437,88 @@ object MusicPlayer {
                 repeatMode = repeatMode
             )
 
-        // Offline: play from disk when we can resolve a file (fast path — no StreamExtractor).
-        resolveOfflineMediaFile(context, song)?.let { file ->
-            playResolved(context, Uri.fromFile(file).toString(), song)
+        // Offline: library metadata + local file or cached HLS manifest.
+        val librarySong = FoxyLibraryStore.state.value.downloadedSongs
+            .firstOrNull { it.videoId == song.videoId }
+            ?: FoxyLibraryStore.state.value.getSongById(song.videoId)
+        val offlineBase = librarySong ?: song
+        FoxyOfflineBundle.resolvePlayableUrl(context, offlineBase)?.let { url ->
+            val enriched = offlineBase.copy(isDownloaded = true)
+            playResolved(context, url, enriched)
+            scope.launch { maybeExtendQueueForAutoplay() }
+            return
+        }
+
+        val cached = preloadedStream
+        if (cached != null && cached.first == song.videoId && !cached.second.isNullOrBlank()) {
+            preloadedStream = null
+            playResolved(context, cached.second, song)
             return
         }
 
         val result = withContext(Dispatchers.IO) {
             StreamExtractor.getStreamResult(song.videoId)
         }
-        result.url?.let { playResolved(context, it, song) } ?: _state.update {
+        result.url?.let {
+            playResolved(context, it, song)
+            scope.launch { maybeExtendQueueForAutoplay() }
+        } ?: _state.update {
             it.copy(isBuffering = false, isPlaying = false, error = result.error ?: "Playback failed")
+        }
+    }
+
+    /**
+     * Metrolist-style “infinite” queue: when near the end, append [YTMusicApi.radio] suggestions
+     * inferred from the current track (phonk, bollywood, artist mix, etc.).
+     */
+    private suspend fun maybeExtendQueueForAutoplay(): Boolean {
+        if (queue.isEmpty() || shuffleEnabled) return false
+        val remaining = queue.lastIndex - queueIndex
+        if (queue.size > 1 && remaining > 2) return false
+        val seed = _state.value.currentSong ?: queue.getOrNull(queueIndex) ?: return false
+        val more = withContext(Dispatchers.IO) {
+            runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+        }
+        if (more.isEmpty()) return false
+        val merged = (queue + more).distinctBy { it.videoId }
+        if (merged.size <= queue.size) return false
+        queue = merged
+        _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
+        schedulePreloadNextTrack()
+        Log.d("FoxyMusic", "Autoplay extended queue to ${queue.size} tracks")
+        return true
+    }
+
+    private fun peekNextQueueSong(): Song? {
+        if (queue.isEmpty() || shuffleEnabled || queue.size <= 1) return null
+        val nextIndex = when {
+            queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
+            repeatMode == RepeatMode.All -> 0
+            else -> return null
+        }
+        return queue.getOrNull(nextIndex)
+    }
+
+    private fun schedulePreloadNextTrack() {
+        preloadJob?.cancel()
+        val ctx = appContext ?: return
+        val next = peekNextQueueSong() ?: run {
+            preloadedStream = null
+            return
+        }
+        val vid = next.videoId
+        if (preloadedStream?.first == vid) return
+        preloadJob = scope.launch(Dispatchers.IO) {
+            resolveOfflineMediaFile(ctx, next)?.let { file ->
+                if (peekNextQueueSong()?.videoId == vid) {
+                    preloadedStream = vid to Uri.fromFile(file).toString()
+                }
+                return@launch
+            }
+            val url = StreamExtractor.getStreamResult(vid).url
+            if (url != null && peekNextQueueSong()?.videoId == vid) {
+                preloadedStream = vid to url
+            }
         }
     }
 
@@ -408,6 +544,8 @@ object MusicPlayer {
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode
         )
+        val swapGen = ++suppressEndAdvanceGeneration
+        suppressEndAdvance = true
         try {
             if (player == null) {
                 val okHttp = FoxyNetworking.streamingClient()
@@ -457,23 +595,30 @@ object MusicPlayer {
                             }
                             Player.STATE_ENDED -> {
                                 Log.d("FoxyMusic", "Playback ended")
+                                if (suppressEndAdvance) {
+                                    Log.d("FoxyMusic", "Ignoring ENDED during track swap")
+                                    return
+                                }
                                 // Never call prepare/stop/playNext synchronously from Player.Listener — ExoPlayer can crash.
                                 scope.launch {
                                     delay(40)
-                                    if (appContext == null) return@launch
-                                    if (stopAfterCurrentSong) {
-                                        stopAfterCurrentSong = false
-                                        _sleepTimerState.value = SleepTimerUiState()
-                                        pause()
-                                        return@launch
-                                    }
-                                    when (repeatMode) {
-                                        RepeatMode.One -> {
-                                            player?.seekTo(0)
-                                            player?.playWhenReady = true
+                                    if (appContext == null || suppressEndAdvance) return@launch
+                                    playbackMutex.withLock {
+                                        if (suppressEndAdvance) return@withLock
+                                        if (stopAfterCurrentSong) {
+                                            stopAfterCurrentSong = false
+                                            _sleepTimerState.value = SleepTimerUiState()
+                                            pause()
+                                            return@withLock
                                         }
-                                        RepeatMode.All -> playNext(loop = true)
-                                        RepeatMode.Off -> playNext()
+                                        when (repeatMode) {
+                                            RepeatMode.One -> {
+                                                player?.seekTo(0)
+                                                player?.playWhenReady = true
+                                            }
+                                            RepeatMode.All -> advanceToNextLocked(loop = true)
+                                            RepeatMode.Off -> advanceToNextLocked(loop = false)
+                                        }
                                     }
                                 }
                             }
@@ -565,8 +710,6 @@ object MusicPlayer {
 
             syncMediaSession(context.applicationContext)
 
-            player?.stop()
-            player?.clearMediaItems()
             val metadata = MediaMetadata.Builder()
                 .setTitle(song.title)
                 .setDisplayTitle(song.title)
@@ -582,9 +725,11 @@ object MusicPlayer {
                 .setMediaMetadata(metadata)
             MimeTypeHint.fromUrl(url)?.let { itemBuilder.setMimeType(it) }
             val mediaItem = itemBuilder.build()
-            player?.setMediaItem(mediaItem)
-            player?.prepare()
-            player?.playWhenReady = true
+            val exo = player ?: throw IllegalStateException("Player not initialized")
+            exo.setMediaItem(mediaItem, /* resetPosition= */ true)
+            exo.prepare()
+            exo.playWhenReady = true
+            FoxyMediaSessionService.refreshPlaybackNotification(context.applicationContext)
             if (!url.startsWith("file:", ignoreCase = true)) {
                 loadSponsorSegments(song.videoId)
             } else {
@@ -593,11 +738,20 @@ object MusicPlayer {
             applyVolumeCrossfade()
             startProgressTicker()
             persistPlaybackSnapshot()
+            schedulePreloadNextTrack()
 
         } catch (e: Exception) {
             Log.e("FoxyMusic", "Exception in play(): ${e.message}")
             _state.update {
                 it.copy(isPlaying = false, isBuffering = false, error = e.message ?: "Playback failed")
+            }
+        } finally {
+            val gen = swapGen
+            scope.launch {
+                delay(450)
+                if (suppressEndAdvanceGeneration == gen) {
+                    suppressEndAdvance = false
+                }
             }
         }
     }
@@ -651,40 +805,80 @@ object MusicPlayer {
 
     fun playNext(loop: Boolean = false) {
         scope.launch {
-            val context = appContext ?: return@launch
-            if (queue.isEmpty()) return@launch
-            if (queue.size == 1) {
-                queueIndex = 0
-                player?.let { p ->
+            playbackMutex.withLock {
+                advanceToNextLocked(loop)
+            }
+        }
+    }
+
+    private suspend fun advanceToNextLocked(loop: Boolean) {
+        val context = appContext ?: return
+        if (queue.isEmpty()) return
+        if (queue.size == 1) {
+            queueIndex = 0
+            player?.let { p ->
+                val gen = ++suppressEndAdvanceGeneration
+                suppressEndAdvance = true
+                try {
                     p.seekTo(0L)
                     p.playWhenReady = true
                     p.play()
+                } finally {
+                    scope.launch {
+                        delay(200)
+                        if (suppressEndAdvanceGeneration == gen) {
+                            suppressEndAdvance = false
+                        }
+                    }
                 }
-                return@launch
             }
-            val nextIndex = when {
-                shuffleEnabled && queue.size > 1 -> {
-                    generateSequence { Random.nextInt(queue.size) }
-                        .first { it != queueIndex }
-                }
-                queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
-                loop -> 0
-                else -> return@launch
-            }
-            queueIndex = nextIndex
-            playPrepared(context, queue[queueIndex])
+            return
         }
+        val nextIndex = when {
+            shuffleEnabled && queue.size > 1 -> {
+                generateSequence { Random.nextInt(queue.size) }
+                    .first { it != queueIndex }
+            }
+            queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
+            loop -> 0
+            else -> {
+                if (!maybeExtendQueueForAutoplay()) return
+                if (queueIndex + 1 > queue.lastIndex) return
+                queueIndex + 1
+            }
+        }
+        queueIndex = nextIndex
+        playPreparedLocked(context, queue[queueIndex])
     }
 
     fun playPrevious() {
         scope.launch {
-            val context = appContext ?: return@launch
-            if (queue.isEmpty()) return@launch
-            val previousIndex = (queueIndex - 1).coerceAtLeast(0)
-            queueIndex = previousIndex
-            playPrepared(context, queue[queueIndex])
+            playbackMutex.withLock {
+                val context = appContext ?: return@withLock
+                if (canPlayTimelinePrevious()) {
+                    suppressTimelineRecord = true
+                    try {
+                        playbackTimelineIndex--
+                        val song = playbackTimeline[playbackTimelineIndex]
+                        val inQueue = queue.indexOfFirst { it.videoId == song.videoId }
+                        if (inQueue >= 0) queueIndex = inQueue
+                        playPreparedLocked(context, song)
+                    } finally {
+                        suppressTimelineRecord = false
+                    }
+                    return@withLock
+                }
+                if (queue.isEmpty()) return@withLock
+                val previousIndex = (queueIndex - 1).coerceAtLeast(0)
+                if (previousIndex == queueIndex) return@withLock
+                queueIndex = previousIndex
+                playPreparedLocked(context, queue[queueIndex])
+            }
         }
     }
+
+    fun canPlayPrevious(): Boolean =
+        canPlayTimelinePrevious() || (queue.isNotEmpty() && queueIndex > 0)
 
     fun setVolume(volume: Float) {
         userVolume = volume.coerceIn(0f, 1f)
@@ -795,6 +989,10 @@ object MusicPlayer {
             stopProgressTicker()
             mediaSessionHolder?.release()
             mediaSessionHolder = null
+            mediaSessionServiceStarted = false
+            preloadJob?.cancel()
+            preloadJob = null
+            preloadedStream = null
             player?.release()
             player = null
             stopMediaSessionService()
@@ -821,8 +1019,9 @@ object MusicPlayer {
                 .setSessionActivity(sessionActivity)
                 .setPeriodicPositionUpdateEnabled(true)
                 .build()
+            startMediaSessionService(context.applicationContext)
+            mediaSessionServiceStarted = true
         }
-        startMediaSessionService(context.applicationContext)
     }
 
     /**

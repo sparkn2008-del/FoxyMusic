@@ -39,12 +39,16 @@ data class FoxyCustomization(
     /** HTTP proxy for stream extraction and playback (host:port). */
     val proxyEnabled: Boolean = false,
     val proxyEndpoint: String = "",
-    /** Reserved: loudness normalization (UI + persistence; DSP wiring later). */
+    /** Lower peak output so loud masters sit closer to quieter tracks ([MusicPlayer] applies ~78% gain). */
     val normalizeVolume: Boolean = false,
     /** Reserved: skip silent segments (UI + persistence; Exo wiring later). */
     val skipSilence: Boolean = false,
     /** Reserved: auto backup (UI only for now). */
-    val autoBackupEnabled: Boolean = false
+    val autoBackupEnabled: Boolean = false,
+    /** Check GitHub releases on launch (throttled). */
+    val autoCheckUpdates: Boolean = true,
+    /** Post a notification when a newer APK is published. */
+    val updateNotifications: Boolean = true,
 ) {
     val accent: Color
         get() = Color(accentArgb)
@@ -97,6 +101,8 @@ object FoxySettings {
     private const val NORM_VOL = "normalize_volume"
     private const val SKIP_SIL = "skip_silence"
     private const val AUTO_BACKUP = "auto_backup"
+    private const val AUTO_CHECK_UPDATES = "auto_check_updates"
+    private const val UPDATE_NOTIFICATIONS = "update_notifications"
 
     private val _state = MutableStateFlow(FoxyCustomization())
     val state: StateFlow<FoxyCustomization> = _state
@@ -136,7 +142,9 @@ object FoxySettings {
             proxyEndpoint = prefs.getString(PROXY_EP, "").orEmpty(),
             normalizeVolume = prefs.getBoolean(NORM_VOL, false),
             skipSilence = prefs.getBoolean(SKIP_SIL, false),
-            autoBackupEnabled = prefs.getBoolean(AUTO_BACKUP, false)
+            autoBackupEnabled = prefs.getBoolean(AUTO_BACKUP, false),
+            autoCheckUpdates = prefs.getBoolean(AUTO_CHECK_UPDATES, true),
+            updateNotifications = prefs.getBoolean(UPDATE_NOTIFICATIONS, true),
         )
     }
 
@@ -173,6 +181,8 @@ object FoxySettings {
             ?.putBoolean(NORM_VOL, next.normalizeVolume)
             ?.putBoolean(SKIP_SIL, next.skipSilence)
             ?.putBoolean(AUTO_BACKUP, next.autoBackupEnabled)
+            ?.putBoolean(AUTO_CHECK_UPDATES, next.autoCheckUpdates)
+            ?.putBoolean(UPDATE_NOTIFICATIONS, next.updateNotifications)
             ?.apply()
     }
 }

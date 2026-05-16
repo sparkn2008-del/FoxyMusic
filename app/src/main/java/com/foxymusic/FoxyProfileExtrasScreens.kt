@@ -69,7 +69,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -297,16 +301,50 @@ fun StorageScreen(navController: NavController) {
 
 @Composable
 fun UpdaterScreen(navController: NavController) {
-    var autoUpdates by remember { mutableStateOf(true) }
-    var notifications by remember { mutableStateOf(true) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings by FoxySettings.state.collectAsState()
+    val (versionName, _) = remember(context) { FoxyGithubUpdate.installedVersion(context) }
+    var checkStatus by remember { mutableStateOf<String?>(null) }
 
     FoxyBackScaffold("Updater", navController) {
         item { FoxyScreenLabel("Current version") }
-        item { FoxyListTile(Icons.Rounded.Update, "Version: 1.0", "FoxyMusic debug") }
+        item { FoxyListTile(Icons.Rounded.Update, "Version: $versionName", "GitHub releases") }
         item { FoxyScreenLabel("Update settings") }
-        item { FoxyToggleRow(Icons.Rounded.Sync, "Automatically check for updates", null, autoUpdates) { autoUpdates = it } }
-        item { FoxyToggleRow(Icons.Rounded.Alarm, "Enable update notifications", null, notifications) { notifications = it } }
-        item { FoxyListTile(Icons.Rounded.Update, "Check for updates") }
+        item {
+            FoxyToggleRow(Icons.Rounded.Sync, "Automatically check for updates", null, settings.autoCheckUpdates) {
+                FoxySettings.update { s -> s.copy(autoCheckUpdates = it) }
+            }
+        }
+        item {
+            FoxyToggleRow(Icons.Rounded.Alarm, "Enable update notifications", null, settings.updateNotifications) {
+                FoxySettings.update { s -> s.copy(updateNotifications = it) }
+            }
+        }
+        item {
+            FoxyListTile(Icons.Rounded.Update, "Check for updates", checkStatus) {
+                checkStatus = "Checking…"
+                scope.launch(Dispatchers.IO) {
+                    val result = FoxyGithubUpdate.checkForUpdate(context)
+                    FoxyUpdatePrefs.setLastCheckMs(context, System.currentTimeMillis())
+                    val status = when {
+                        !result.ok -> result.error ?: "Check failed"
+                        result.updateAvailable -> "Update: ${result.latestTag}"
+                        else -> "Up to date (${result.latestTag.ifBlank { "latest" }})"
+                    }
+                    withContext(Dispatchers.Main) {
+                        checkStatus = status
+                    }
+                    if (result.ok && result.updateAvailable && settings.updateNotifications) {
+                        val tag = result.latestTag
+                        if (tag.isNotBlank() && tag != FoxyUpdatePrefs.lastNotifiedTag(context)) {
+                            FoxyUpdateNotifier.show(context, tag, result.htmlUrl, result.releaseNotes)
+                            FoxyUpdatePrefs.setLastNotifiedTag(context, tag)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -322,16 +360,25 @@ fun AboutScreen(navController: NavController) {
                     Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = colors.accent, modifier = Modifier.size(58.dp))
                     Column(modifier = Modifier.padding(start = 20.dp)) {
                         Text("FoxyMusic", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-                        Text("1.0  UNIVERSAL", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("v1.0", color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    "Made with ❤️ by Foxy Nish aka sparkn2008-del 🦊✨",
+                    color = colors.muted,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("github.com/sparkn2008-del/FoxyMusic", color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(22.dp))
             }
         }
         item { FoxyScreenLabel("Community & Info") }
         item { FoxyListTile(Icons.Rounded.Security, "Privacy-first local controls") }
         item { FoxyListTile(Icons.Rounded.Info, "Open-source friendly architecture") }
-        item { FoxyListTile(Icons.Rounded.Favorite, "Made with love by FoxyNish for Audiophiles... ; )") }
+        item { FoxyListTile(Icons.Rounded.Favorite, "Made with ❤️ by Foxy Nish aka sparkn2008-del") }
     }
 }
 

@@ -43,6 +43,7 @@ object FoxyPlayerConnection {
 
     fun setVolume(volume: Float) = MusicPlayer.setVolume(volume)
     fun setPlaybackAdjustments(speed: Float, pitch: Float) = MusicPlayer.setPlaybackAdjustments(speed, pitch)
+    fun refreshPlaybackAudioSettings() = MusicPlayer.refreshPlaybackAudioSettings()
 
     fun scheduleSleepTimer(minutes: Int) = MusicPlayer.scheduleSleepTimer(minutes)
     fun sleepAfterCurrentSong() = MusicPlayer.sleepAfterCurrentSong()

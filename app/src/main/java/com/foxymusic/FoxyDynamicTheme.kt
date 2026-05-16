@@ -84,20 +84,25 @@ object FoxyDynamicTheme {
                     return@launch
                 }
 
+                val square = centerSquareBitmap(bitmap)
                 try {
-                    val color = dominantColorFrom(bitmap)
+                    val color = dominantColorFrom(square)
                     withContext(Dispatchers.Main.immediate) {
                         if (stillCurrentSong(song.videoId)) {
                             _accent.value = color
                             bumpPaletteEpoch()
                         }
                     }
-                    if (ctx != null && song.videoId.isNotBlank()) {
+                    if (ctx != null && song.isDownloaded && song.videoId.isNotBlank()) {
                         runCatching {
                             val dir = File(ctx.cacheDir, "foxy_player_art").apply { mkdirs() }
                             val out = File(dir, "${song.videoId}.jpg")
+                            val thumb = scaleBitmapMaxSide(square, 512)
                             FileOutputStream(out).use { fos ->
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, fos)
+                                thumb.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+                            }
+                            if (thumb !== square) {
+                                thumb.recycle()
                             }
                             withContext(Dispatchers.Main.immediate) {
                                 if (stillCurrentSong(song.videoId)) {
@@ -108,7 +113,10 @@ object FoxyDynamicTheme {
                         }
                     }
                 } finally {
-                    bitmap.recycle()
+                    square.recycle()
+                    if (square !== bitmap) {
+                        bitmap.recycle()
+                    }
                 }
             }
         }
@@ -194,6 +202,24 @@ object FoxyDynamicTheme {
     private fun Float.boost(): Float {
         val lifted = (this * 1.18f + 0.08f).coerceIn(0.18f, 1f)
         return (lifted * 255).roundToInt() / 255f
+    }
+
+    /** Center-crop to square so Flutter mini-player art is not stretched. */
+    private fun centerSquareBitmap(source: Bitmap): Bitmap {
+        val side = minOf(source.width, source.height).coerceAtLeast(1)
+        if (source.width == side && source.height == side) return source
+        val x = ((source.width - side) / 2).coerceAtLeast(0)
+        val y = ((source.height - side) / 2).coerceAtLeast(0)
+        return Bitmap.createBitmap(source, x, y, side, side)
+    }
+
+    private fun scaleBitmapMaxSide(source: Bitmap, maxSidePx: Int): Bitmap {
+        val maxDim = maxOf(source.width, source.height)
+        if (maxDim <= maxSidePx) return source
+        val scale = maxSidePx.toFloat() / maxDim.toFloat()
+        val w = (source.width * scale).roundToInt().coerceAtLeast(1)
+        val h = (source.height * scale).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(source, w, h, true)
     }
 
     private fun sampleSizeForMaxSide(width: Int, height: Int, maxSidePx: Int): Int {

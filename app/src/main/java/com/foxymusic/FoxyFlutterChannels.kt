@@ -17,6 +17,7 @@ object FoxyFlutterChannels {
         const val INIT = "init"
         const val HOME_FEED = "homeFeed"
         const val SEARCH = "search"
+        const val SEARCH_ALL = "searchAll"
         const val ACCOUNT_INFO = "accountInfo"
         const val MOOD_MIX = "moodMix"
         const val PLAY = "play"
@@ -53,6 +54,7 @@ object FoxyFlutterChannels {
         const val SET_PLAYER_PROGRESS_STYLE = "setPlayerProgressStyle"
         const val STORAGE_STATS = "storageStats"
         const val CHECK_GITHUB_RELEASE = "checkGitHubRelease"
+        const val GET_APP_VERSION = "getAppVersion"
         const val OPEN_SYSTEM_EQUALIZER = "openSystemEqualizer"
         const val OPEN_WEB_LOGIN = "openWebLogin"
         const val ACCOUNT_SIGN_OUT = "accountSignOut"
@@ -61,6 +63,10 @@ object FoxyFlutterChannels {
         const val MOVE_TASK_TO_BACK = "moveTaskToBack"
         /** One-shot snapshot of the same map as [Events.PLAYER_STATE] `state` (for Flutter UI seeding). */
         const val GET_PLAYER_STATE = "getPlayerState"
+        const val PICK_HOME_BACKGROUND = "pickHomeBackground"
+        const val CLEAR_HOME_BACKGROUND = "clearHomeBackground"
+        /** Relaunch the app so Flutter reloads home wallpaper and theme state. */
+        const val RESTART_APP = "restartApp"
     }
 
     /**
@@ -85,6 +91,8 @@ object FoxyFlutterChannels {
         const val ACCOUNT_CHANGED = "accountChanged"
         const val TOAST = "toast"
         const val ERROR = "error"
+        /** Newer APK published on GitHub — Flutter shows optional in-app prompt. */
+        const val UPDATE_AVAILABLE = "updateAvailable"
     }
 }
 
