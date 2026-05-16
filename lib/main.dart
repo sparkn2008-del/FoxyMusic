@@ -414,8 +414,10 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
       if (type == 'playerState') {
         final state = _asMap(map['state']);
         if (state != null && mounted) {
-          setState(() => _player = _detachPlayerState(state));
-        }
+  setState(() {
+    _player = _detachPlayerState(state);
+  });
+}
       } else if (type == 'accountChanged') {
         unawaited(_loadAccount());
       }
