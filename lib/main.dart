@@ -21,8 +21,8 @@ const double _kCardRadius = 12;
 /// Light black veil on transparent chrome (nav, controls, chips).
 const double _kSubtleBlackTint = 0.10;
 
-const String _kAppVersionLabel = 'v1.0';
-const String _kAppVersionName = '1.0';
+String _kAppVersionLabel = 'v1.1';
+String _kAppVersionName = '1.1';
 const String _kGitHubProjectUrl = 'https://github.com/sparkn2008-del/FoxyMusic';
 const String _kAboutCreditLine =
     'Made with ❤️ by Foxy Nish aka sparkn2008-del 🦊✨';
@@ -81,6 +81,7 @@ class FoxyFlutterApp extends StatefulWidget {
 }
 
 class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
+  final _rootNavKey = GlobalKey<NavigatorState>();
   _FlutterAppearance _appearance = const _FlutterAppearance();
   String? _homeBackgroundPath;
   bool _dynamicSongColors = true;
@@ -93,6 +94,7 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
   void initState() {
     super.initState();
     _loadAppearance();
+    unawaited(_loadAppVersion());
     _rootEventSub = _events.receiveBroadcastStream().listen((dynamic event) {
       final map = _asMap(event);
       if (map == null) return;
@@ -123,6 +125,11 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
         }
       } else if (type == 'appearanceChanged') {
         _loadAppearance();
+      } else if (type == 'updateAvailable') {
+        final update = _asMap(map['update']);
+        if (update != null) {
+          _promptUpdateAvailable(update);
+        }
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -175,6 +182,27 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
     } catch (_) {}
   }
 
+  Future<void> _loadAppVersion() async {
+    try {
+      final map = _asMap(await _method.invokeMethod('getAppVersion'));
+      if (map == null || !mounted) return;
+      final name = map['versionName']?.toString().trim() ?? '';
+      if (name.isEmpty) return;
+      setState(() {
+        _kAppVersionName = name;
+        _kAppVersionLabel = 'v$name';
+      });
+    } catch (_) {}
+  }
+
+  void _promptUpdateAvailable(Map<String, dynamic> map) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _rootNavKey.currentContext;
+      if (ctx == null || !mounted) return;
+      _showUpdateResultDialog(ctx, map, title: 'Update available');
+    });
+  }
+
   Color get _effectiveAccent {
     if (_dynamicSongColors && _songAccentArgb != null) {
       return Color(_songAccentArgb! & 0xFFFFFFFF);
@@ -186,6 +214,7 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
   Widget build(BuildContext context) {
     final accent = _effectiveAccent;
     return MaterialApp(
+      navigatorKey: _rootNavKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -1578,9 +1607,9 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
                 onPlay: widget.onPlay,
               ),
             ),
-          const SliverToBoxAdapter(
+          SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 32, 16, 120),
+              padding: const EdgeInsets.fromLTRB(16, 32, 16, 120),
               child: Center(
                 child: Text(
                   '@2026 FoxyMusic $_kAppVersionLabel',
@@ -2593,11 +2622,10 @@ class _SearchTabState extends State<_SearchTab>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _FoxyGlassButton(
-                      borderRadius: BorderRadius.circular(28),
-                      blurSigma: 14,
-                      tintOpacity: 0.3,
-                      padding: EdgeInsets.zero,
+                    _FoxyGlassTint(
+                      borderRadius: 28,
+                      tintOpacity: 0.52,
+                      borderOpacity: 0.16,
                       child: TextField(
                       controller: _controller,
                       autofocus: false,
@@ -4834,6 +4862,103 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+void _showUpdateResultDialog(
+  BuildContext context,
+  Map<String, dynamic> map, {
+  String? title,
+}) {
+  final ok = map['ok'] == true;
+  final newer = map['updateAvailable'] == true;
+  final installed =
+      map['installedVersionName']?.toString().trim() ?? _kAppVersionName;
+  final tag = map['tagName']?.toString() ?? map['latestTag']?.toString() ?? '';
+  final html = map['htmlUrl']?.toString() ?? '';
+  final apk = map['downloadUrl']?.toString() ?? '';
+  final err = map['error']?.toString() ?? '';
+  final notes = map['body']?.toString().trim() ?? '';
+  final dialogTitle = title ??
+      (ok
+          ? (newer ? 'Update available' : 'You are up to date')
+          : 'Update check failed');
+  showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(dialogTitle),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!ok)
+              Text(err.isEmpty ? 'Could not reach GitHub.' : err),
+            if (ok) ...[
+              Text('Installed: v$installed'),
+              if (tag.isNotEmpty) Text('Latest: $tag'),
+              if (ok && !newer && tag.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('No newer release than your installed build.'),
+                ),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  notes,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.72),
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Close'),
+        ),
+        if (html.isNotEmpty)
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openExternalUrl(context, html);
+            },
+            child: const Text('Release page'),
+          ),
+        if (apk.isNotEmpty)
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openExternalUrl(context, apk);
+            },
+            child: const Text('Download APK'),
+          ),
+      ],
+    ),
+  );
+}
+
+Future<void> _openExternalUrl(BuildContext context, String url) async {
+  try {
+    final ok =
+        await _method.invokeMethod<bool>('openExternalUrl', {'url': url}) ==
+        true;
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open link on this device')),
+      );
+    }
+  } catch (_) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open link on this device')),
+    );
+  }
+}
+
 /// Dedicated About Us panel inside Settings (logo, credits, links).
 class _AboutUsPanel extends StatelessWidget {
   const _AboutUsPanel({required this.onOpenExternal});
@@ -5079,49 +5204,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
   }
 
   void _showUpdateResult(Map<String, dynamic> map) {
-    final ok = map['ok'] == true;
-    final tag = map['tagName']?.toString() ?? '';
-    final html = map['htmlUrl']?.toString() ?? '';
-    final apk = map['downloadUrl']?.toString() ?? '';
-    final err = map['error']?.toString() ?? '';
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ok ? 'Latest release' : 'Update check'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!ok) Text(err.isEmpty ? 'Unknown error' : err),
-              if (ok && tag.isNotEmpty) Text('Tag: $tag'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-          if (html.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _openExternal(html);
-              },
-              child: const Text('Release page'),
-            ),
-          if (apk.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _openExternal(apk);
-              },
-              child: const Text('Download APK'),
-            ),
-        ],
-      ),
-    );
+    _showUpdateResultDialog(context, map);
   }
 
   Future<void> _openEqualizer() async {
@@ -5842,6 +5925,44 @@ class _SettingsSheetState extends State<_SettingsSheet>
                 subtitle: const Text('UI + persistence only for now'),
                 onChanged: (v) => _apply({'autoBackupEnabled': v}),
               ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _bool('autoCheckUpdates', true),
+                title: const Text(
+                  'Check for updates automatically',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Looks for new GitHub releases about once per day.',
+                ),
+                onChanged: (v) => _apply({'autoCheckUpdates': v}),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _bool('updateNotifications', true),
+                title: const Text(
+                  'Update notifications',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Shows a system notification when a newer APK is published.',
+                ),
+                onChanged: (v) => _apply({'updateNotifications': v}),
+              ),
+              _SettingsCard(
+                title: 'App updates',
+                subtitle: 'GitHub releases · sparkn2008-del/FoxyMusic',
+                child: OutlinedButton.icon(
+                  onPressed: _checkUpdate,
+                  icon: const Icon(Icons.system_update_alt_rounded, size: 20),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(_kCardRadius),
+                    ),
+                  ),
+                  label: const Text('Check for updates now'),
+                ),
+              ),
               _SettingsCard(
                 title: 'Shortcuts',
                 subtitle: 'System integrations',
@@ -5857,15 +5978,6 @@ class _SettingsSheetState extends State<_SettingsSheet>
                         ),
                       ),
                       child: const Text('System equalizer'),
-                    ),
-                    OutlinedButton(
-                      onPressed: _checkUpdate,
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(_kCardRadius),
-                        ),
-                      ),
-                      child: const Text('Check GitHub release'),
                     ),
                   ],
                 ),
@@ -6342,7 +6454,7 @@ class _HomeQuickPicksState extends State<_HomeQuickPicks> {
                     ),
                     _FoxyGlassTextButton(
                       label: 'Play all',
-                      onPressed: () => onPlay(songs.first, songs),
+                      onPressed: () => widget.onPlay(songs.first, songs),
                     ),
                   ],
                 ),
@@ -7893,8 +8005,8 @@ class _MiniPlayerState extends State<_MiniPlayer>
         borderRadius: BorderRadius.circular(16),
         child: _FoxyGlassTint(
           borderRadius: 16,
-          tintOpacity: 0.38,
-          borderOpacity: 0.14,
+          tintOpacity: 0.54,
+          borderOpacity: 0.18,
           child: playerBody,
         ),
       );

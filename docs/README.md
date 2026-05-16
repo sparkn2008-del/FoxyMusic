@@ -46,11 +46,9 @@ Flutter tooling (format, analyze) may live outside your shell `PATH`; one docume
 
 ## Changelog
 
-High-level, dated changes (bridge fixes, theme, downloads metadata, media notification, Flutter UI shell, release compile notes) are maintained in:
+High-level, dated release notes are in **`changelog.txt`** at the repo root.
 
-**`FOXYMUSIC_INSTRUCTIONS.txt`** → section **“Changelog (recent)”**.
-
-That file is the canonical changelog for agents and maintainers; this README only points to it so the story stays in one place.
+Engineering notes for agents and maintainers are in **`FOXYMUSIC_INSTRUCTIONS.txt`** (channels, builds, updater, “Changelog (recent)” section).
 
 ---
 
