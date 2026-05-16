@@ -1,0 +1,3 @@
+# Keep GitHub language stats focused on Kotlin/Dart (not Gradle HTML reports).
+*.html linguist-vendored
+build/** linguist-generated
