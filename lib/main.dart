@@ -577,10 +577,10 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
-    final currentSong = _Song.fromMap(
-      _asMap(_player['currentSong']) ?? const {},
-    );
-    final hasSong = currentSong.videoId.isNotEmpty;
+    final currentSongMap = _asMap(_player['currentSong']) ?? const {};
+final currentSong = _Song.fromMap(currentSongMap);
+
+final hasSong = currentSong.videoId.isNotEmpty && currentSong.title.isNotEmpty;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final miniBottom = bottomInset + 10;
     final tabs = [
@@ -647,8 +647,8 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
                 padding: EdgeInsets.only(bottom: miniBottom),
                 child: _MiniPlayer(
                   key: ValueKey<String>(
-                    '${currentSong.videoId}|${_player['playerEpoch'] ?? 0}|${currentSong.offlineArtworkPath ?? ''}',
-                  ),
+                'mini-${currentSong.videoId}-${_player['queueIndex'] ?? 0}-${_player['playerEpoch'] ?? 0}',
+                ),
                   player: _player,
                   onOpen: () => _openPlayer(),
                   onResync: _syncPlayerFromNative,
