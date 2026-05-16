@@ -408,21 +408,21 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
     _loadAccount();
     unawaited(_syncPlayerFromNative());
     _sub = _events.receiveBroadcastStream().listen((dynamic event) {
-      final map = _asMap(event);
-      if (map == null) return;
-      final type = map['type']?.toString();
-      if (type == 'playerState') {
-        final state = _asMap(map['state']);
-        if (state != null && mounted) {
-  setState(() {
-    _player = _detachPlayerState(state);
-  });
-}
-      } else if (type == 'accountChanged') {
-        unawaited(_loadAccount());
-      }
-    });
+  final map = _asMap(event);
+  if (map == null) return;
+  final type = map['type']?.toString();
+
+  if (type == 'playerState') {
+    final state = _asMap(map['state']);
+    if (state != null && mounted) {
+      setState(() {
+        _player = _detachPlayerState(state);   // ensure fresh map
+      });
+    }
+  } else if (type == 'accountChanged') {
+    unawaited(_loadAccount());
   }
+});
 
   Future<void> _loadAccount() async {
     try {
@@ -642,16 +642,15 @@ final hasSong = currentSong.videoId.isNotEmpty && currentSong.title.isNotEmpty;
       body: Stack(
         children: [
           IndexedStack(index: safeTab, children: tabs),
-          if (hasSong && !_nowPlayingSheetOpen)
+                   if (hasSong && !_nowPlayingSheetOpen)
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: EdgeInsets.only(bottom: miniBottom),
                 child: _MiniPlayer(
-                  key: ValueKey<String>(
-                'mini-${currentSong.videoId}-${_player['queueIndex'] ?? 0}-${_player['playerEpoch'] ?? 0}',
-                ),
-                  player: _player,
+                  // Stronger key + force rebuild
+                  key: ValueKey('mini_${_player['playerEpoch'] ?? DateTime.now().millisecondsSinceEpoch}'),
+                  player: Map<String, dynamic>.from(_player), // force new map
                   onOpen: () => _openPlayer(),
                   onResync: _syncPlayerFromNative,
                 ),
