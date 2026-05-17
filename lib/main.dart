@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'foxy_startup_splash.dart';
+
 const _method = MethodChannel('foxy_music/methods');
 const _events = EventChannel('foxy_music/events');
 
@@ -263,7 +265,9 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
           ),
         ),
       ),
-      home: FoxyHomeShell(homeBackgroundPath: _homeBackgroundPath),
+      home: FoxyAppLaunchGate(
+        child: FoxyHomeShell(homeBackgroundPath: _homeBackgroundPath),
+      ),
     );
   }
 }
@@ -3124,6 +3128,7 @@ class _LibraryTabState extends State<_LibraryTab>
   List<_Song> _downloads = const [];
   List<_Song> _mostPlayed = const [];
   List<_Song> _recentlyAdded = const [];
+  List<_Song> _explore = const [];
   List<_UserPlaylist> _userPlaylists = const [];
   int _scope = _scopeHub;
   final Map<String, double> _downloadProgress = {};
@@ -3196,7 +3201,7 @@ class _LibraryTabState extends State<_LibraryTab>
       case _scopePlaylists:
         return const [];
       default:
-        return _recentlyAdded;
+        return _recentlyAdded.isNotEmpty ? _recentlyAdded : _explore;
     }
   }
 
@@ -3213,7 +3218,7 @@ class _LibraryTabState extends State<_LibraryTab>
       case _scopePlaylists:
         return 'Your playlists';
       default:
-        return 'Recently added';
+        return _recentlyAdded.isNotEmpty ? 'Recently added' : 'Recommended for you';
     }
   }
 
@@ -3846,7 +3851,7 @@ class _LibraryTabState extends State<_LibraryTab>
                   thumbRadius: 12,
                   trailingIcon: Icons.play_circle_fill_rounded,
                   showPlayAndMore: true,
-                  onTap: () => widget.onPlay(song, songs),
+                  onTap: () => widget.onPlay(song, [song], radioTail: true),
                   onMore: () => _openSongOverflow(context, song, songs),
                 );
               }
@@ -3856,7 +3861,7 @@ class _LibraryTabState extends State<_LibraryTab>
                 thumbRadius: 12,
                 trailingIcon: Icons.play_circle_fill_rounded,
                 showPlayAndMore: true,
-                onTap: () => widget.onPlay(song, songs),
+                onTap: () => widget.onPlay(song, [song], radioTail: true),
                 onMore: () => _openSongOverflow(context, song, songs),
               );
             },
@@ -4076,7 +4081,7 @@ class _AccountHubBodyState extends State<_AccountHubBody>
                 song: song,
                 index: index,
                 thumbRadius: 10,
-                onTap: () => widget.onPlay(song, songs),
+                onTap: () => widget.onPlay(song, [song], radioTail: true),
               );
             },
           ),
@@ -4206,6 +4211,7 @@ Future<void> showFoxySongOverflowMenu(
   final crossfadeMs = ((appearance['crossfadeMs'] ?? 0) as num).toInt();
   final crossfadeOn = crossfadeMs > 0;
   final lrclib = appearance['lyricsPreferLrclib'] != false;
+  final lyricsRoman = appearance['lyricsRomanize'] == true;
   final normalizeOn = appearance['normalizeVolume'] == true;
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
@@ -4427,7 +4433,7 @@ Future<void> showFoxySongOverflowMenu(
                 subtitle: const Text('Play this track'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  onPlay(song, [song]);
+                  onPlay(song, [song], radioTail: true);
                 },
               ),
               ListTile(
@@ -4475,6 +4481,39 @@ Future<void> showFoxySongOverflowMenu(
                   Navigator.pop(ctx);
                   await _method.invokeMethod('setAppearance', {
                     'lyricsPreferLrclib': !lrclib,
+                  });
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.translate_rounded),
+                title: const Text('Lyrics in English letters'),
+                subtitle: const Text(
+                  'Romanize non-Latin synced lyrics',
+                ),
+                trailing: Switch(
+                  value: lyricsRoman,
+                  onChanged: (v) async {
+                    Navigator.pop(ctx);
+                    await _method.invokeMethod('setAppearance', {
+                      'lyricsRomanize': v,
+                    });
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          v
+                              ? 'Lyrics will show in Latin letters.'
+                              : 'Lyrics will show in original script.',
+                        ),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                ),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _method.invokeMethod('setAppearance', {
+                    'lyricsRomanize': !lyricsRoman,
                   });
                 },
               ),
@@ -5347,9 +5386,11 @@ class _SettingsSheetState extends State<_SettingsSheet>
     final compact = _bool('compactPlayer');
     final gestures = _bool('gestureControls', true);
     final persistent = _bool('persistentQueue', true);
+    final playWhenDismissed = _bool('continuePlaybackWhenDismissed');
     final saveHistory = _bool('saveHistory', true);
     final sponsor = _bool('sponsorBlockEnabled', true);
     final lrclib = _bool('lyricsPreferLrclib', true);
+    final lyricsRoman = _bool('lyricsRomanize');
     final proxyOn = _bool('proxyEnabled');
     final norm = _bool('normalizeVolume');
     final skipSil = _bool('skipSilence');
@@ -5772,6 +5813,16 @@ class _SettingsSheetState extends State<_SettingsSheet>
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
+                      value: playWhenDismissed,
+                      title: const Text('Play when app is dismissed'),
+                      subtitle: const Text(
+                        'Keep music playing after swiping FoxyMusic away from recents',
+                      ),
+                      onChanged: (v) =>
+                          _apply({'continuePlaybackWhenDismissed': v}),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
                       value: saveHistory,
                       title: const Text('Save listening history'),
                       onChanged: (v) => _apply({'saveHistory': v}),
@@ -5790,6 +5841,15 @@ class _SettingsSheetState extends State<_SettingsSheet>
                         'LRCLIB first, YouTube captions as fallback. Also in ⋮ song menu.',
                       ),
                       onChanged: (v) => _apply({'lyricsPreferLrclib': v}),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: lyricsRoman,
+                      title: const Text('Lyrics in English letters'),
+                      subtitle: const Text(
+                        'Romanize non-Latin synced lyrics (SimpMusic-style).',
+                      ),
+                      onChanged: (v) => _apply({'lyricsRomanize': v}),
                     ),
                   ],
                 ),
@@ -6454,7 +6514,7 @@ class _HomeQuickPicksState extends State<_HomeQuickPicks> {
                     ),
                     _FoxyGlassTextButton(
                       label: 'Play all',
-                      onPressed: () => widget.onPlay(songs.first, songs),
+                      onPressed: () => widget.onPlay(songs.first, songs, radioTail: false),
                     ),
                   ],
                 ),
@@ -6475,7 +6535,7 @@ class _HomeQuickPicksState extends State<_HomeQuickPicks> {
                   child: _QuickPickBannerCard(
                     song: song,
                     active: song.videoId == widget.currentVideoId,
-                    onTap: () => widget.onPlay(song, songs),
+                    onTap: () => widget.onPlay(song, [song], radioTail: true),
                   ),
                 );
               },
@@ -6802,7 +6862,7 @@ class _HomeFreshFindsRow extends StatelessWidget {
                   songs: replaySongs,
                   onTap: () {
                     if (replaySongs.isNotEmpty) {
-                      onPlay(replaySongs.first, replaySongs);
+                      onPlay(replaySongs.first, [replaySongs.first], radioTail: true);
                     }
                   },
                 ),
@@ -7125,7 +7185,7 @@ class _HomeSongCardsSection extends StatelessWidget {
             _HomeSongCard(
               song: song,
               active: song.videoId == currentVideoId,
-              onTap: () => onPlay(song, section.songs),
+              onTap: () => onPlay(song, [song], radioTail: true),
             ),
         ],
       ),
@@ -7256,7 +7316,7 @@ class _HomeGridShelf extends StatelessWidget {
                 return _HomeGridTile(
                   song: song,
                   active: song.videoId == currentVideoId,
-                  onTap: () => onPlay(song, section.songs),
+                  onTap: () => onPlay(song, [song], radioTail: true),
                 );
               },
             ),
@@ -7386,7 +7446,7 @@ class _HomeVideoShelf extends StatelessWidget {
                 return _HomeVideoCard(
                   song: song,
                   active: song.videoId == currentVideoId,
-                  onTap: () => onPlay(song, section.songs),
+                  onTap: () => onPlay(song, [song], radioTail: true),
                 );
               },
             ),
@@ -7533,7 +7593,7 @@ class _HomeChartShelf extends StatelessWidget {
                 return SizedBox(
                   width: 148,
                   child: _FoxyGlassButton(
-                    onTap: () => onPlay(song, section.songs),
+                    onTap: () => onPlay(song, [song], radioTail: true),
                     borderRadius: BorderRadius.circular(10),
                     blurSigma: 12,
                     padding: const EdgeInsets.all(8),
@@ -7623,7 +7683,7 @@ class _HomeArtistShelf extends StatelessWidget {
                 return SizedBox(
                   width: 120,
                   child: _FoxyGlassButton(
-                    onTap: () => onPlay(song, section.songs),
+                    onTap: () => onPlay(song, [song], radioTail: true),
                     borderRadius: BorderRadius.circular(14),
                     blurSigma: 12,
                     padding: const EdgeInsets.all(8),
@@ -7712,7 +7772,7 @@ class _SongShelf extends StatelessWidget {
                 return _SongCard(
                   song: song,
                   active: song.videoId == currentVideoId,
-                  onTap: () => onPlay(song, section.songs),
+                  onTap: () => onPlay(song, [song], radioTail: true),
                 );
               },
             ),
@@ -8248,6 +8308,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   List<_LyricLine> _lyrics = const [];
   String? _lyricsFor;
   bool _lyricsPreferLrclib = true;
+  bool _lyricsRomanize = false;
   bool _lyricsLoading = false;
   double _artworkSwipeDx = 0;
   bool _blurPlayerBackdrop = true;
@@ -8309,13 +8370,17 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   Future<void> _loadLyricsIfNeeded(Map<String, dynamic> player) async {
     final song = _Song.fromMap(_asMap(player['currentSong']) ?? const {});
     final preferLrclib = player['lyricsPreferLrclib'] != false;
+    final romanize = player['lyricsRomanize'] == true;
     if (song.videoId.isEmpty ||
-        (_lyricsFor == song.videoId && _lyricsPreferLrclib == preferLrclib) ||
+        (_lyricsFor == song.videoId &&
+            _lyricsPreferLrclib == preferLrclib &&
+            _lyricsRomanize == romanize) ||
         _lyricsLoading) {
       return;
     }
     _lyricsFor = song.videoId;
     _lyricsPreferLrclib = preferLrclib;
+    _lyricsRomanize = romanize;
     setState(() {
       _lyricsLoading = true;
       _lyrics = const [];
@@ -8563,7 +8628,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                           child: Container(
                             width: 40,
                             height: 4,
-                            margin: const EdgeInsets.only(top: 2, bottom: 6),
+                            margin: const EdgeInsets.only(top: 2, bottom: 4),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.25),
                               borderRadius: BorderRadius.circular(999),
@@ -8586,13 +8651,15 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                             ),
                             Expanded(
                               child: Center(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: _PlayerTabs(
-                                    accent: accent,
-                                    selected: _tab,
-                                    onPick: (tab) =>
-                                        setState(() => _tab = tab),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: _PlayerTabs(
+                                      selected: _tab,
+                                      onPick: (tab) =>
+                                          setState(() => _tab = tab),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -8633,6 +8700,8 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                               accent: accent,
                               preferLrclib:
                                   _player['lyricsPreferLrclib'] != false,
+                              romanized:
+                                  _player['lyricsRomanize'] == true,
                             ),
                           ),
                           2 => SingleChildScrollView(
@@ -8752,7 +8821,11 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   ],
                                                 ),
                                               ),
-                                              Row(
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 4,
+                                                ),
+                                                child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
                                                   _NpIconAction(
@@ -8862,9 +8935,10 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   ),
                                                 ],
                                               ),
+                                              ),
                                             ],
                                           ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 6),
                                           if (buffering)
                                             Padding(
                                               padding: const EdgeInsets.only(
@@ -9020,12 +9094,10 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
 
 class _PlayerTabs extends StatelessWidget {
   const _PlayerTabs({
-    required this.accent,
     required this.selected,
     required this.onPick,
   });
 
-  final Color accent;
   final int selected;
   final ValueChanged<int> onPick;
 
@@ -9036,14 +9108,10 @@ class _PlayerTabs extends StatelessWidget {
       (Icons.lyrics_outlined, 'Lyrics'),
       (Icons.queue_music_outlined, 'Queue'),
     ];
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: _kMetrolistNpSurface.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: _kMetrolistNpSurfaceHigh.withValues(alpha: 0.55),
-        ),
-      ),
+    return _FoxyGlassTint(
+      borderRadius: 999,
+      tintOpacity: 0.4,
+      borderOpacity: 0.14,
       child: Padding(
         padding: const EdgeInsets.all(3),
         child: Row(
@@ -9054,28 +9122,22 @@ class _PlayerTabs extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 2),
                 child: Tooltip(
                   message: tabs[i].$2,
-                  child: Material(
-                    color: selected == i
-                        ? accent
-                        : Colors.black.withValues(alpha: _kSubtleBlackTint),
+                  child: _FoxyGlassButton(
+                    blur: false,
+                    selected: selected == i,
                     borderRadius: BorderRadius.circular(999),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(999),
-                      onTap: () => onPick(i),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 13,
-                          vertical: 9,
-                        ),
-                        child: Icon(
-                          tabs[i].$1,
-                          size: 21,
-                          color: selected == i
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.62),
-                        ),
-                      ),
+                    tintOpacity: selected == i ? 0.42 : 0.26,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 13,
+                      vertical: 9,
+                    ),
+                    onTap: () => onPick(i),
+                    child: Icon(
+                      tabs[i].$1,
+                      size: 21,
+                      color: selected == i
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.62),
                     ),
                   ),
                 ),
@@ -9341,7 +9403,7 @@ class _MetrolistSeekPainter extends CustomPainter {
       oldDelegate.motionPhase != motionPhase;
 }
 
-/// Compact action chip on the now-playing title row (SimpMusic-style).
+/// Compact frosted-glass action on the now-playing title row (SimpMusic-style).
 class _NpIconAction extends StatelessWidget {
   const _NpIconAction({
     required this.tooltip,
@@ -9357,19 +9419,19 @@ class _NpIconAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(
-        minWidth: 36,
-        minHeight: 36,
-      ),
-      icon: Icon(
-        icon,
-        size: 22,
-        color: iconColor ?? Colors.white.withValues(alpha: 0.92),
+    return Tooltip(
+      message: tooltip,
+      child: _FoxyGlassButton(
+        blur: false,
+        borderRadius: BorderRadius.circular(12),
+        tintOpacity: 0.34,
+        padding: const EdgeInsets.all(7),
+        onTap: onPressed,
+        child: Icon(
+          icon,
+          size: 20,
+          color: iconColor ?? Colors.white.withValues(alpha: 0.92),
+        ),
       ),
     );
   }
@@ -9598,6 +9660,7 @@ class _LyricsTab extends StatelessWidget {
     required this.positionMs,
     required this.accent,
     this.preferLrclib = true,
+    this.romanized = false,
   });
 
   final List<_LyricLine> lines;
@@ -9605,6 +9668,7 @@ class _LyricsTab extends StatelessWidget {
   final int positionMs;
   final Color accent;
   final bool preferLrclib;
+  final bool romanized;
 
   @override
   Widget build(BuildContext context) {
@@ -9655,7 +9719,11 @@ class _LyricsTab extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
           child: Text(
-            preferLrclib ? 'Synced · LRCLIB' : 'Synced · YouTube captions',
+            romanized
+                ? 'Synced · Romanized'
+                : (preferLrclib
+                    ? 'Synced · LRCLIB'
+                    : 'Synced · YouTube captions'),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.45),
@@ -10135,6 +10203,7 @@ class _SpinningDiscOverlay extends StatefulWidget {
 class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _spinCtrl;
+  bool _spinning = false;
 
   @override
   void initState() {
@@ -10143,18 +10212,33 @@ class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
       vsync: this,
       duration: const Duration(seconds: 5),
     );
+    _spinning = widget.playing;
     _syncSpin();
   }
 
   @override
   void didUpdateWidget(covariant _SpinningDiscOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.playing != widget.playing) _syncSpin();
+    if (oldWidget.playing != widget.playing) {
+      if (widget.playing) {
+        _spinning = true;
+      } else {
+        _spinning = false;
+      }
+      _syncSpin();
+    }
+  }
+
+  void _toggleSpin() {
+    setState(() {
+      _spinning = !_spinning;
+      _syncSpin();
+    });
   }
 
   void _syncSpin() {
-    if (widget.playing) {
-      _spinCtrl.repeat();
+    if (_spinning) {
+      if (!_spinCtrl.isAnimating) _spinCtrl.repeat();
     } else {
       _spinCtrl.stop();
     }
@@ -10168,43 +10252,47 @@ class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.55),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: RotationTransition(
-        turns: _spinCtrl,
-        child: SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ClipOval(
-                child: _Artwork(
-                  url: widget.artworkUrl,
-                  size: widget.size,
-                  radius: 0,
-                  highQuality: true,
-                  identityTag: 'disc-${widget.identityTag}',
-                  offlineArtworkPath: widget.offlineArtworkPath,
-                  useOfflineArtwork: widget.useOfflineArtwork,
+    return GestureDetector(
+      onTap: _toggleSpin,
+      behavior: HitTestBehavior.opaque,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.55),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: RotationTransition(
+          turns: _spinCtrl,
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipOval(
+                  child: _Artwork(
+                    url: widget.artworkUrl,
+                    size: widget.size,
+                    radius: 0,
+                    highQuality: true,
+                    identityTag: 'disc-${widget.identityTag}',
+                    offlineArtworkPath: widget.offlineArtworkPath,
+                    useOfflineArtwork: widget.useOfflineArtwork,
+                  ),
                 ),
-              ),
-              CustomPaint(
-                painter: const _VinylDiskPainter(compact: true),
-              ),
-              Center(
-                child: _FoxyAppIconBadge(size: widget.size * 0.36),
-              ),
-            ],
+                CustomPaint(
+                  painter: const _VinylDiskPainter(compact: true),
+                ),
+                Center(
+                  child: _FoxyAppIconBadge(size: widget.size * 0.36),
+                ),
+              ],
+            ),
           ),
         ),
       ),
