@@ -45,6 +45,7 @@ flutter:
   assets:
     - assets/images/foxy_home_bg.png
     - assets/images/foxy_logo.png
+    - assets/images/foxy_splash.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
