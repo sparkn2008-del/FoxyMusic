@@ -18,7 +18,7 @@ object FoxyCache {
             val again = cache
             if (again != null) return again
 
-            val maxBytes = 512L * 1024L * 1024L // 512MB default for now
+            val maxBytes = 768L * 1024L * 1024L // 768MB media cache for smoother replays
             val evictor = LeastRecentlyUsedCacheEvictor(maxBytes)
             val dir = File(context.applicationContext.cacheDir, "media_cache").apply { mkdirs() }
             val db = StandaloneDatabaseProvider(context.applicationContext)

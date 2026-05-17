@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.TaskStackBuilder
 import androidx.core.content.ContextCompat
@@ -36,6 +37,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.min
 import kotlin.random.Random
 
 enum class SleepTimerMode { Off, AfterMinutes, AfterCurrentTrack }
@@ -98,6 +101,19 @@ object MusicPlayer {
     @Volatile
     private var preloadedStream: Pair<String, String>? = null
     private var preloadJob: Job? = null
+    private var preloadedForQueueIndex: Int = -1
+    private var radioSession: YtmRadioSession? = null
+    private var radioExtendJob: Job? = null
+    private var crossfadeAdvanceJob: Job? = null
+    @Volatile
+    private var manualVolumeRamp = false
+    private var exoPlayer: ExoPlayer? = null
+    private val streamResolveInFlight = ConcurrentHashMap.newKeySet<String>()
+    private var trackEntryMs = 0L
+    /** How long before track end we resolve URL + attach the next Exo media item. */
+    private const val PRELOAD_LEAD_MS = 75_000L
+    /** Metrolist: prefetch more radio tracks when this many queue items remain. */
+    private const val RADIO_LOAD_MORE_THRESHOLD = 5
     /** Chronological play order for back (previous track), SimpMusic-style. */
     private val playbackTimeline = mutableListOf<Song>()
     private var playbackTimelineIndex = -1
@@ -126,18 +142,20 @@ object MusicPlayer {
             ?.associateBy({ it.nameWithoutExtension }, { it })
             .orEmpty()
 
-        queue = session.queue.map { song ->
-            val localFile = localById[song.videoId]
-            if (localFile != null && localFile.length() > 0L) {
-                song.copy(
-                    localPath = localFile.absolutePath,
-                    isDownloaded = true,
-                    streamUrl = null
-                )
-            } else {
-                song
+        queue = session.queue
+            .map { song ->
+                val localFile = localById[song.videoId]
+                if (localFile != null && localFile.length() > 0L) {
+                    song.copy(
+                        localPath = localFile.absolutePath,
+                        isDownloaded = true,
+                        streamUrl = null,
+                    )
+                } else {
+                    song
+                }
             }
-        }
+            .musicQueueTracksOnly()
         queueIndex = session.queueIndex
         shuffleEnabled = session.shuffle
         repeatMode = when (session.repeatOrdinal) {
@@ -200,7 +218,10 @@ object MusicPlayer {
                         bufferedFraction = buffered
                     )
                 }
+                maybeScheduleEarlyPreload(dur, pos)
+                scheduleRadioExtendIfNeeded()
                 applyVolumeCrossfade()
+                maybeTriggerCrossfadeAdvance(dur, pos)
                 maybeSkipSponsor(pos)
                 delay(480)
             }
@@ -217,6 +238,7 @@ object MusicPlayer {
     }
 
     private fun applyVolumeCrossfade() {
+        if (manualVolumeRamp) return
         val p = player ?: return
         val base = effectiveUserVolume()
         val cross = FoxySettings.state.value.crossfadeMs
@@ -233,8 +255,74 @@ object MusicPlayer {
         val c = cross.toLong()
         val rem = (dur - pos).coerceAtLeast(0L)
         val fadeOut = if (rem < c) (rem.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
-        val fadeIn = if (pos < c) (pos.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
-        p.volume = base * minOf(fadeOut, fadeIn)
+        val entryElapsed = (SystemClock.elapsedRealtime() - trackEntryMs).coerceAtLeast(0L)
+        val fadeIn = if (entryElapsed < c) (entryElapsed.toFloat() / c.toFloat()).coerceIn(0f, 1f) else 1f
+        p.volume = base * min(fadeOut, fadeIn)
+    }
+
+    private suspend fun rampVolumeTo(
+        target: Float,
+        durationMs: Long,
+        manageRampFlag: Boolean = true,
+    ) {
+        val p = player ?: return
+        if (manageRampFlag) manualVolumeRamp = true
+        try {
+            val start = p.volume
+            if (durationMs <= 0L) {
+                p.volume = target
+                return
+            }
+            val steps = (durationMs / 40L).coerceIn(1L, 24L).toInt()
+            val stepMs = (durationMs / steps).coerceAtLeast(16L)
+            repeat(steps) { step ->
+                val t = (step + 1).toFloat() / steps.toFloat()
+                p.volume = start + (target - start) * t
+                delay(stepMs)
+            }
+            p.volume = target
+        } finally {
+            if (manageRampFlag) manualVolumeRamp = false
+        }
+    }
+
+    private fun maybeScheduleEarlyPreload(durationMs: Long, positionMs: Long) {
+        if (durationMs <= 0L) return
+        val remaining = (durationMs - positionMs).coerceAtLeast(0L)
+        val cross = FoxySettings.state.value.crossfadeMs.toLong()
+        val leadMs = maxOf(PRELOAD_LEAD_MS, cross * 2L, 25_000L)
+        if (remaining <= leadMs) {
+            schedulePreloadNextTrack()
+        }
+    }
+
+    private fun maybeTriggerCrossfadeAdvance(durationMs: Long, positionMs: Long) {
+        val cross = FoxySettings.state.value.crossfadeMs
+        if (cross <= 0 || repeatMode == RepeatMode.One) return
+        if (durationMs <= cross) return
+        val remaining = (durationMs - positionMs).coerceAtLeast(0L)
+        if (remaining > cross || remaining <= 0L) return
+        if (crossfadeAdvanceJob?.isActive == true) return
+        crossfadeAdvanceJob = scope.launch {
+            playbackMutex.withLock {
+                crossfadeToNextTrackLocked()
+            }
+        }
+    }
+
+    private fun warmStreamUrl(videoId: String) {
+        val vid = videoId.trim()
+        if (vid.isEmpty()) return
+        val tier = FoxySettings.state.value.streamQualityTier
+        if (StreamUrlCache.peek(vid, tier) != null) return
+        if (!streamResolveInFlight.add(vid)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                StreamExtractor.getStreamResult(vid, tier)
+            } finally {
+                streamResolveInFlight.remove(vid)
+            }
+        }
     }
 
     /** Re-apply crossfade / normalization after settings change while playing. */
@@ -328,11 +416,18 @@ object MusicPlayer {
             queue = listOf(seed)
             queueIndex = 0
             publishInstantPlaybackUi(seed)
+            warmStreamUrl(seed.videoId)
+            radioSession = YtmRadioSession.forSeed(seed.videoId)
             scope.launch {
-                val radio = withContext(Dispatchers.IO) {
-                    runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+                val (session, radio) = withContext(Dispatchers.IO) {
+                    runCatching { YTMusicApi.fetchRadioPage(seed, radioSession) }
+                        .getOrDefault(radioSession!! to emptyList())
                 }
-                queue = (listOf(seed) + radio).distinctBy { it.videoId }
+                radioSession = session
+                queue = (listOf(seed) + radio)
+                    .distinctBy { it.videoId }
+                    .musicQueueTracksOnly()
+                if (queue.isEmpty()) queue = listOf(seed)
                 queueIndex = 0
                 _state.update {
                     it.copy(queue = queue, queueIndex = queueIndex)
@@ -340,11 +435,16 @@ object MusicPlayer {
                 playPrepared(ctx, seed)
             }
         } else {
-            queue = songs.distinctBy { it.videoId }
+            radioSession = null
+            val filtered = songs.distinctBy { it.videoId }.musicQueueTracksOnly()
+            if (filtered.isEmpty()) return
+            queue = filtered
             queueIndex = startIndex.coerceIn(0, queue.lastIndex)
-            publishInstantPlaybackUi(queue[queueIndex])
+            val startSong = queue[queueIndex]
+            publishInstantPlaybackUi(startSong)
+            warmStreamUrl(startSong.videoId)
             scope.launch {
-                playPrepared(ctx, queue[queueIndex])
+                playPrepared(ctx, startSong)
             }
         }
     }
@@ -358,6 +458,7 @@ object MusicPlayer {
             queueIndex = queue.indexOfFirst { it.videoId == song.videoId }
         }
         publishInstantPlaybackUi(song)
+        warmStreamUrl(song.videoId)
         scope.launch {
             playPrepared(context.applicationContext, song)
         }
@@ -414,6 +515,7 @@ object MusicPlayer {
 
     private suspend fun playPreparedLocked(context: Context, song: Song) {
         appContext = context.applicationContext
+        crossfadeAdvanceJob?.cancel()
         recordPlaybackTimeline(song)
         if (queue.none { it.videoId == song.videoId }) {
             queue = listOf(song)
@@ -456,8 +558,15 @@ object MusicPlayer {
             return
         }
 
+        val tier = FoxySettings.state.value.streamQualityTier
+        StreamUrlCache.peek(song.videoId, tier)?.let { url ->
+            playResolved(context, url, song)
+            scope.launch { maybeExtendQueueForAutoplay() }
+            return
+        }
+
         val result = withContext(Dispatchers.IO) {
-            StreamExtractor.getStreamResult(song.videoId)
+            StreamExtractor.getStreamResult(song.videoId, tier)
         }
         result.url?.let {
             playResolved(context, it, song)
@@ -468,56 +577,267 @@ object MusicPlayer {
     }
 
     /**
-     * Metrolist-style “infinite” queue: when near the end, append [YTMusicApi.radio] suggestions
-     * inferred from the current track (phonk, bollywood, artist mix, etc.).
+     * Metrolist-style infinite queue: paginated Innertube radio (`RDAMVM` + continuation).
      */
     private suspend fun maybeExtendQueueForAutoplay(): Boolean {
         if (queue.isEmpty() || shuffleEnabled) return false
         val remaining = queue.lastIndex - queueIndex
-        if (queue.size > 1 && remaining > 2) return false
+        if (queue.size > 1 && remaining > RADIO_LOAD_MORE_THRESHOLD) return false
         val seed = _state.value.currentSong ?: queue.getOrNull(queueIndex) ?: return false
-        val more = withContext(Dispatchers.IO) {
-            runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+        val session = radioSession?.takeIf { it.seedVideoId == seed.videoId }
+            ?: YtmRadioSession.forSeed(seed.videoId).also { radioSession = it }
+        if (session.exhausted && session.continuation == null && queue.size > 1) return false
+
+        val (updatedSession, more) = withContext(Dispatchers.IO) {
+            runCatching { YTMusicApi.fetchRadioPage(seed, session) }.getOrDefault(session to emptyList())
         }
+        radioSession = updatedSession
         if (more.isEmpty()) return false
-        val merged = (queue + more).distinctBy { it.videoId }
+        val merged = (queue + more).distinctBy { it.videoId }.musicQueueTracksOnly()
         if (merged.size <= queue.size) return false
         queue = merged
         _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
         schedulePreloadNextTrack()
-        Log.d("FoxyMusic", "Autoplay extended queue to ${queue.size} tracks")
+        Log.d("FoxyMusic", "Radio queue extended to ${queue.size} tracks (continuation=${updatedSession.continuation != null})")
         return true
     }
 
-    private fun peekNextQueueSong(): Song? {
-        if (queue.isEmpty() || shuffleEnabled || queue.size <= 1) return null
-        val nextIndex = when {
-            queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
-            repeatMode == RepeatMode.All -> 0
-            else -> return null
+    private fun scheduleRadioExtendIfNeeded() {
+        if (shuffleEnabled || queue.isEmpty()) return
+        val remaining = queue.lastIndex - queueIndex
+        if (remaining > RADIO_LOAD_MORE_THRESHOLD) return
+        val seed = _state.value.currentSong ?: return
+        val session = radioSession
+        if (session != null && session.seedVideoId != seed.videoId) {
+            radioSession = YtmRadioSession.forSeed(seed.videoId)
         }
-        return queue.getOrNull(nextIndex)
+        if (radioExtendJob?.isActive == true) return
+        radioExtendJob = scope.launch {
+            playbackMutex.withLock {
+                maybeExtendQueueForAutoplay()
+            }
+        }
+    }
+
+    private fun peekNextQueueIndex(): Int? {
+        if (queue.isEmpty()) return null
+        if (queue.size == 1) {
+            return if (repeatMode == RepeatMode.All) 0 else null
+        }
+        return when {
+            shuffleEnabled -> indexOfRandomMusicTrack(queueIndex)
+            else -> indexOfNextMusicTrack(queueIndex, repeatMode == RepeatMode.All)
+        }
+    }
+
+    private fun peekNextQueueSong(): Song? {
+        val index = peekNextQueueIndex() ?: return null
+        return queue.getOrNull(index)
+    }
+
+    private suspend fun resolveNextQueueIndex(loop: Boolean): Int? {
+        if (queue.isEmpty()) return null
+        if (queue.size == 1) return if (loop) 0 else null
+        var nextIndex = when {
+            shuffleEnabled && queue.size > 1 -> indexOfRandomMusicTrack(queueIndex)
+            else -> indexOfNextMusicTrack(queueIndex, loop)
+        }
+        if (nextIndex == null && !shuffleEnabled) {
+            if (!maybeExtendQueueForAutoplay()) return null
+            nextIndex = indexOfNextMusicTrack(queueIndex, loop)
+        }
+        return nextIndex
+    }
+
+    /** Skip non-songs, podcasts, playlists, and tracks longer than 10 minutes. */
+    private fun indexOfNextMusicTrack(fromIndex: Int, loop: Boolean): Int? {
+        if (queue.isEmpty()) return null
+        for (i in (fromIndex + 1)..queue.lastIndex) {
+            if (queue[i].isMusicQueueTrack() && !queue[i].exceedsQueueDurationCap()) return i
+        }
+        if (loop) {
+            for (i in 0..fromIndex.coerceAtMost(queue.lastIndex)) {
+                if (queue[i].isMusicQueueTrack() && !queue[i].exceedsQueueDurationCap()) return i
+            }
+        }
+        return null
+    }
+
+    private fun indexOfRandomMusicTrack(excluding: Int): Int? {
+        val picks = queue.indices.filter {
+            it != excluding && queue[it].isMusicQueueTrack() && !queue[it].exceedsQueueDurationCap()
+        }
+        return picks.randomOrNull()
     }
 
     private fun schedulePreloadNextTrack() {
         preloadJob?.cancel()
         val ctx = appContext ?: return
-        val next = peekNextQueueSong() ?: run {
+        val nextIndex = peekNextQueueIndex() ?: run {
             preloadedStream = null
+            preloadedForQueueIndex = -1
             return
         }
+        val next = queue.getOrNull(nextIndex) ?: return
         val vid = next.videoId
-        if (preloadedStream?.first == vid) return
-        preloadJob = scope.launch(Dispatchers.IO) {
-            resolveOfflineMediaFile(ctx, next)?.let { file ->
-                if (peekNextQueueSong()?.videoId == vid) {
-                    preloadedStream = vid to Uri.fromFile(file).toString()
-                }
-                return@launch
+        if (preloadedStream?.first == vid && preloadedForQueueIndex == nextIndex) {
+            scope.launch(Dispatchers.Main.immediate) {
+                attachNextMediaItemToExo(next, preloadedStream!!.second)
             }
-            val url = StreamExtractor.getStreamResult(vid).url
-            if (url != null && peekNextQueueSong()?.videoId == vid) {
-                preloadedStream = vid to url
+            return
+        }
+        preloadedForQueueIndex = nextIndex
+        preloadJob = scope.launch(Dispatchers.IO) {
+            val url = resolveOfflineMediaFile(ctx, next)?.let { Uri.fromFile(it).toString() }
+                ?: run {
+                    val tier = FoxySettings.state.value.streamQualityTier
+                    StreamUrlCache.peek(vid, tier)
+                        ?: StreamExtractor.getStreamResult(vid, tier).url
+                }
+            if (url.isNullOrBlank()) return@launch
+            if (peekNextQueueIndex() != nextIndex) return@launch
+            preloadedStream = vid to url
+            withContext(Dispatchers.Main.immediate) {
+                if (peekNextQueueIndex() == nextIndex) {
+                    attachNextMediaItemToExo(next, url)
+                }
+            }
+        }
+    }
+
+    private suspend fun resolveStreamUrlForSong(context: Context, song: Song): String? {
+        val librarySong = FoxyLibraryStore.state.value.downloadedSongs
+            .firstOrNull { it.videoId == song.videoId }
+            ?: FoxyLibraryStore.state.value.getSongById(song.videoId)
+        val offlineBase = librarySong ?: song
+        FoxyOfflineBundle.resolvePlayableUrl(context, offlineBase)?.let { return it }
+        preloadedStream?.takeIf { it.first == song.videoId }?.second?.let { return it }
+        val tier = FoxySettings.state.value.streamQualityTier
+        StreamUrlCache.peek(song.videoId, tier)?.let { return it }
+        return withContext(Dispatchers.IO) {
+            StreamExtractor.getStreamResult(song.videoId, tier).url
+        }
+    }
+
+    private fun buildMediaItem(song: Song, url: String): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(song.title)
+            .setDisplayTitle(song.title)
+            .setArtist(song.artist)
+            .apply {
+                song.album?.takeIf { it.isNotBlank() }?.let { setAlbumTitle(it) }
+            }
+            .setArtworkUri(song.highQualityArtworkUrl().takeIf { it.isNotBlank() }?.let(Uri::parse))
+            .build()
+        val itemBuilder = MediaItem.Builder()
+            .setUri(Uri.parse(url))
+            .setMediaId(song.videoId)
+            .setMediaMetadata(metadata)
+        MimeTypeHint.fromUrl(url)?.let { itemBuilder.setMimeType(it) }
+        return itemBuilder.build()
+    }
+
+    private fun attachNextMediaItemToExo(song: Song, url: String) {
+        val exo = exoPlayer ?: return
+        val currentIndex = exo.currentMediaItemIndex
+        if (currentIndex < 0) return
+        if (exo.mediaItemCount > currentIndex + 1) {
+            val existing = exo.getMediaItemAt(currentIndex + 1)
+            if (existing.mediaId == song.videoId) return
+            exo.removeMediaItem(currentIndex + 1)
+        }
+        exo.addMediaItem(buildMediaItem(song, url))
+        Log.d("FoxyMusic", "Pre-attached next track for Exo preload: ${song.title}")
+    }
+
+    private fun trimPlayedMediaItemsBehindCurrent() {
+        val exo = exoPlayer ?: return
+        while (exo.mediaItemCount > 1 && exo.currentMediaItemIndex > 0) {
+            exo.removeMediaItem(0)
+        }
+    }
+
+    private fun applyNowPlayingUi(song: Song) {
+        if (FoxySettings.state.value.saveHistory) {
+            FoxyLibraryStore.addHistory(song)
+        }
+        FoxyDynamicTheme.updateFromSong(song)
+        _state.value = _state.value.copy(
+            currentSong = song,
+            isBuffering = false,
+            error = null,
+            queue = queue,
+            queueIndex = queueIndex,
+            shuffleEnabled = shuffleEnabled,
+            repeatMode = repeatMode,
+        )
+        FoxyMediaSessionService.refreshPlaybackNotification(appContext ?: return)
+    }
+
+    private fun exoHasPreloadedNext(song: Song): Boolean {
+        val exo = exoPlayer ?: return false
+        val index = exo.currentMediaItemIndex
+        if (index < 0 || exo.mediaItemCount <= index + 1) return false
+        return exo.getMediaItemAt(index + 1).mediaId == song.videoId
+    }
+
+    private suspend fun crossfadeToNextTrackLocked() {
+        val context = appContext ?: return
+        val cross = FoxySettings.state.value.crossfadeMs
+        if (cross <= 0 || repeatMode == RepeatMode.One) return
+        val current = _state.value.currentSong ?: return
+        val loop = repeatMode == RepeatMode.All
+        val nextIndex = resolveNextQueueIndex(loop) ?: return
+        val nextSong = queue.getOrNull(nextIndex) ?: return
+        if (nextSong.videoId == current.videoId) return
+
+        val url = resolveStreamUrlForSong(context, nextSong) ?: return
+        preloadedStream = nextSong.videoId to url
+        preloadedForQueueIndex = nextIndex
+
+        val exo = exoPlayer ?: return
+        val rawDur = exo.duration
+        val dur = if (rawDur != C.TIME_UNSET && rawDur > 0L) rawDur else _state.value.durationMs
+        val pos = exo.currentPosition.coerceAtLeast(0L)
+        val remaining = (dur - pos).coerceAtLeast(0L)
+        val fadeOutMs = remaining.coerceAtMost((cross / 2).toLong()).coerceAtLeast(80L)
+
+        val gen = ++suppressEndAdvanceGeneration
+        suppressEndAdvance = true
+        manualVolumeRamp = true
+        try {
+            rampVolumeTo(0f, fadeOutMs, manageRampFlag = false)
+            attachNextMediaItemToExo(nextSong, url)
+            queueIndex = nextIndex
+            recordPlaybackTimeline(nextSong)
+            retryAttemptsForCurrent = 0
+            preloadedStream = null
+            preloadedForQueueIndex = -1
+
+            if (exoHasPreloadedNext(nextSong)) {
+                exo.seekToNextMediaItem()
+                trimPlayedMediaItemsBehindCurrent()
+                trackEntryMs = SystemClock.elapsedRealtime()
+                applyNowPlayingUi(nextSong)
+                publishDurationFromPlayer()
+                if (!url.startsWith("file:", ignoreCase = true)) {
+                    loadSponsorSegments(nextSong.videoId)
+                } else {
+                    sponsorRangesMs = emptyList()
+                }
+                rampVolumeTo(effectiveUserVolume(), (cross / 2).toLong(), manageRampFlag = false)
+                schedulePreloadNextTrack()
+            } else {
+                playResolved(context, url, nextSong)
+            }
+        } finally {
+            manualVolumeRamp = false
+            applyVolumeCrossfade()
+            scope.launch {
+                delay(500)
+                if (suppressEndAdvanceGeneration == gen) {
+                    suppressEndAdvance = false
+                }
             }
         }
     }
@@ -562,7 +882,10 @@ object MusicPlayer {
                 val cacheFactory = CacheDataSource.Factory()
                     .setCache(FoxyCache.get(context.applicationContext))
                     .setUpstreamDataSourceFactory(defaultDataSourceFactory)
-                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                    .setFlags(
+                        CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR or
+                            CacheDataSource.FLAG_BLOCK_ON_CACHE,
+                    )
 
                 val exo = ExoPlayer.Builder(context.applicationContext)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory))
@@ -575,6 +898,7 @@ object MusicPlayer {
                     )
                     .setHandleAudioBecomingNoisy(true)
                     .build()
+                exoPlayer = exo
                 player = FoxyQueueForwardingPlayer(exo)
 
                 player?.addListener(object : Player.Listener {
@@ -592,6 +916,7 @@ object MusicPlayer {
                             Player.STATE_READY -> {
                                 Log.d("FoxyMusic", "Ready to play!")
                                 publishDurationFromPlayer()
+                                schedulePreloadNextTrack()
                             }
                             Player.STATE_ENDED -> {
                                 Log.d("FoxyMusic", "Playback ended")
@@ -635,11 +960,13 @@ object MusicPlayer {
                         val shouldRetry = current != null && retryAttemptsForCurrent == 0
                         if (shouldRetry) {
                             retryAttemptsForCurrent = 1
+                            StreamUrlCache.invalidate(current.videoId)
                             scope.launch {
                                 val ctx = appContext ?: return@launch
                                 try {
+                                    val tier = FoxySettings.state.value.streamQualityTier
                                     val result = withContext(Dispatchers.IO) {
-                                        StreamExtractor.getStreamResult(current.videoId)
+                                        StreamExtractor.getStreamResult(current.videoId, tier)
                                     }
                                     val url = result.url
                                     if (url != null) {
@@ -688,6 +1015,15 @@ object MusicPlayer {
 
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         publishDurationFromPlayer()
+                        val item = mediaItem ?: return
+                        val song = queue.getOrNull(queueIndex)
+                        if (song?.videoId == item.mediaId) return
+                        val matched = queue.firstOrNull { it.videoId == item.mediaId } ?: return
+                        val idx = queue.indexOfFirst { it.videoId == matched.videoId }
+                        if (idx >= 0) queueIndex = idx
+                        trackEntryMs = SystemClock.elapsedRealtime()
+                        applyNowPlayingUi(matched)
+                        schedulePreloadNextTrack()
                     }
 
                     override fun onEvents(player: Player, events: Player.Events) {
@@ -710,22 +1046,10 @@ object MusicPlayer {
 
             syncMediaSession(context.applicationContext)
 
-            val metadata = MediaMetadata.Builder()
-                .setTitle(song.title)
-                .setDisplayTitle(song.title)
-                .setArtist(song.artist)
-                .apply {
-                    song.album?.takeIf { it.isNotBlank() }?.let { setAlbumTitle(it) }
-                }
-                .setArtworkUri(song.highQualityArtworkUrl().takeIf { it.isNotBlank() }?.let(android.net.Uri::parse))
-                .build()
-            val itemBuilder = MediaItem.Builder()
-                .setUri(Uri.parse(url))
-                .setMediaId(song.videoId)
-                .setMediaMetadata(metadata)
-            MimeTypeHint.fromUrl(url)?.let { itemBuilder.setMimeType(it) }
-            val mediaItem = itemBuilder.build()
-            val exo = player ?: throw IllegalStateException("Player not initialized")
+            val mediaItem = buildMediaItem(song, url)
+            val exo = exoPlayer ?: throw IllegalStateException("Player not initialized")
+            crossfadeAdvanceJob?.cancel()
+            trackEntryMs = SystemClock.elapsedRealtime()
             exo.setMediaItem(mediaItem, /* resetPosition= */ true)
             exo.prepare()
             exo.playWhenReady = true
@@ -834,21 +1158,21 @@ object MusicPlayer {
             }
             return
         }
-        val nextIndex = when {
-            shuffleEnabled && queue.size > 1 -> {
-                generateSequence { Random.nextInt(queue.size) }
-                    .first { it != queueIndex }
-            }
-            queueIndex + 1 <= queue.lastIndex -> queueIndex + 1
-            loop -> 0
-            else -> {
-                if (!maybeExtendQueueForAutoplay()) return
-                if (queueIndex + 1 > queue.lastIndex) return
-                queueIndex + 1
-            }
+        val nextIndex = resolveNextQueueIndex(loop) ?: return
+        val nextSong = queue[nextIndex]
+        val cross = FoxySettings.state.value.crossfadeMs
+        if (cross > 0 && repeatMode != RepeatMode.One) {
+            crossfadeToNextTrackLocked()
+            return
+        }
+        val url = resolveStreamUrlForSong(context, nextSong)
+        if (url != null) {
+            queueIndex = nextIndex
+            playResolved(context, url, nextSong)
+            return
         }
         queueIndex = nextIndex
-        playPreparedLocked(context, queue[queueIndex])
+        playPreparedLocked(context, nextSong)
     }
 
     fun playPrevious() {
@@ -910,12 +1234,14 @@ object MusicPlayer {
     }
 
     fun addToQueue(song: Song) {
+        if (!song.isMusicQueueTrack()) return
         queue = (queue + song).distinctBy { it.videoId }
         _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
         persistPlaybackSnapshot()
     }
 
     fun enqueuePlayNext(song: Song) {
+        if (!song.isMusicQueueTrack()) return
         scope.launch {
             if (queue.isEmpty()) {
                 val ctx = appContext ?: return@launch
@@ -951,10 +1277,17 @@ object MusicPlayer {
 
     fun startRadio(context: Context, seed: Song) {
         scope.launch {
-            val radio = withContext(Dispatchers.IO) {
-                runCatching { YTMusicApi.radio(seed) }.getOrDefault(emptyList())
+            radioSession = YtmRadioSession.forSeed(seed.videoId)
+            val (session, radio) = withContext(Dispatchers.IO) {
+                runCatching { YTMusicApi.fetchRadioPage(seed, radioSession) }
+                    .getOrDefault(radioSession!! to emptyList())
             }
-            playQueue(context.applicationContext, (listOf(seed) + radio).distinctBy { it.videoId }, 0)
+            radioSession = session
+            playQueue(
+                context.applicationContext,
+                (listOf(seed) + radio).distinctBy { it.videoId }.musicQueueTracksOnly(),
+                0,
+            )
         }
     }
 
@@ -993,8 +1326,13 @@ object MusicPlayer {
             preloadJob?.cancel()
             preloadJob = null
             preloadedStream = null
+            preloadedForQueueIndex = -1
+            radioSession = null
+            radioExtendJob?.cancel()
+            crossfadeAdvanceJob?.cancel()
             player?.release()
             player = null
+            exoPlayer = null
             stopMediaSessionService()
             _state.value = PlayerUiState()
             _sleepTimerState.value = SleepTimerUiState()

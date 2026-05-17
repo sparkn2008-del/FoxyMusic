@@ -19,6 +19,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLDecoder
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 data class StreamResult(
@@ -64,9 +65,9 @@ object StreamExtractor {
             if (c != null && seed == httpClientSeed) return c
             val nb = OkHttpClient.Builder()
                 .retryOnConnectionFailure(true)
-                .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
-                .connectTimeout(12, TimeUnit.SECONDS)
-                .readTimeout(18, TimeUnit.SECONDS)
+                .connectionPool(okhttp3.ConnectionPool(12, 5, TimeUnit.MINUTES))
+                .connectTimeout(7, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
             FoxyNetworking.applyProxy(nb)
             val built = nb.build()
             httpClient = built
@@ -180,60 +181,56 @@ object StreamExtractor {
         val extractorErrors = mutableListOf<String>()
         var lastError: String? = null
 
-        for (ytClient in clients) {
+        StreamUrlCache.peek(videoId, tier)?.let { cached ->
+            Log.d(TAG, "Stream cache hit for $videoId")
+            return StreamResult(cached, source = "cache")
+        }
+
+        val parallelCount = 3.coerceAtMost(clients.size)
+        if (parallelCount > 0) {
+            val pool = Executors.newFixedThreadPool(parallelCount)
             try {
-                val body = buildPlayerBody(videoId, ytClient)
-                val request = Request.Builder()
-                    .url("https://www.youtube.com/youtubei/v1/player?key=${ytClient.apiKey}")
-                    .post(body.toString().toRequestBody("application/json".toMediaType()))
-                    .addHeader("User-Agent", ytClient.userAgent)
-                    .addHeader("Accept", "application/json")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Origin", ytClient.origin)
-                    .addHeader("Referer", "${ytClient.referer}$videoId")
-                    .addHeader("X-YouTube-Client-Name", ytClient.clientNameHeader)
-                    .addHeader("X-YouTube-Client-Version", ytClient.version)
-                    .addFoxyAccountHeaders(ytClient.origin)
-                    .build()
-
-                httpClient().newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        lastError = "YouTube player request failed (${response.code})"
-                        Log.w(TAG, "${ytClient.name} HTTP failed: ${response.code}")
-                        return@use
+                val futures = clients.take(parallelCount).map { ytClient ->
+                    pool.submit<StreamResult?> {
+                        tryInnertubeClient(videoId, ytClient, maxBitrate)
                     }
-
-                    val responseStr = response.body?.string().orEmpty()
-                    val json = JSONObject(responseStr)
-                    val status = json.optJSONObject("playabilityStatus")
-                    val playability = status?.optString("status").orEmpty()
-
-                    if (playability.isNotBlank() && playability != "OK") {
-                        lastError = status?.optString("reason").takeUnless { it.isNullOrBlank() }
-                            ?.let { "${ytClient.name}: $it" }
-                            ?: "${ytClient.name}: This video is not playable"
-                        return@use
-                    }
-
-                    val streamingData = json.optJSONObject("streamingData")
-                    val streamUrl = streamingData?.let { pickBestPlayableUrl(it, maxBitrate) }
-                    if (!streamUrl.isNullOrBlank()) {
-                        Log.d(TAG, "${ytClient.name} stream selected: ${streamUrl.take(80)}")
-                        return StreamResult(streamUrl, source = ytClient.name)
-                    }
-
-                    lastError = "${ytClient.name}: No direct audio stream was returned"
                 }
-            } catch (e: Exception) {
-                lastError = "${ytClient.name}: ${e.message ?: "Could not fetch stream URL"}"
-                Log.w(TAG, "Innertube client failed: ${ytClient.name}", e)
+                for (future in futures) {
+                    try {
+                        val attempt = future.get(10, TimeUnit.SECONDS)
+                        if (attempt?.url != null) {
+                            futures.forEach { it.cancel(true) }
+                            return cacheAndReturn(videoId, tier, attempt)
+                        }
+                        attempt?.error?.let {
+                            lastError = it
+                            extractorErrors += it
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Parallel Innertube attempt failed", e)
+                    }
+                }
+            } finally {
+                pool.shutdownNow()
             }
         }
 
-        lastError?.let { extractorErrors += it }
+        for (ytClient in clients.drop(parallelCount)) {
+            val attempt = tryInnertubeClient(videoId, ytClient, maxBitrate)
+            if (attempt.url != null) {
+                return cacheAndReturn(videoId, tier, attempt)
+            }
+            attempt.error?.let {
+                lastError = it
+                extractorErrors += it
+            }
+        }
+
+        lastError?.let { if (it !in extractorErrors) extractorErrors += it }
         when (val newPipeResult = getNewPipeStreamResult(videoId, maxBitrate)) {
             is ExtractorAttempt.Success -> {
                 Log.d(TAG, "NewPipe stream selected: ${newPipeResult.url.take(80)}")
+                StreamUrlCache.put(videoId, tier, newPipeResult.url)
                 return StreamResult(newPipeResult.url, source = "NewPipe")
             }
             is ExtractorAttempt.Failure -> {
@@ -242,6 +239,66 @@ object StreamExtractor {
             }
         }
         return StreamResult(null, extractorErrors.joinToString("\n").ifBlank { "Could not fetch stream URL" })
+    }
+
+    private fun cacheAndReturn(videoId: String, tier: Int, result: StreamResult): StreamResult {
+        result.url?.let { StreamUrlCache.put(videoId, tier, it) }
+        return result
+    }
+
+    private fun tryInnertubeClient(
+        videoId: String,
+        ytClient: YouTubeClient,
+        maxBitrate: Int?,
+    ): StreamResult {
+        return try {
+            val body = buildPlayerBody(videoId, ytClient)
+            val request = Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/player?key=${ytClient.apiKey}")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .addHeader("User-Agent", ytClient.userAgent)
+                .addHeader("Accept", "application/json")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Origin", ytClient.origin)
+                .addHeader("Referer", "${ytClient.referer}$videoId")
+                .addHeader("X-YouTube-Client-Name", ytClient.clientNameHeader)
+                .addHeader("X-YouTube-Client-Version", ytClient.version)
+                .addFoxyAccountHeaders(ytClient.origin)
+                .build()
+
+            httpClient().newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val err = "YouTube player request failed (${response.code})"
+                    Log.w(TAG, "${ytClient.name} HTTP failed: ${response.code}")
+                    return StreamResult(null, error = "${ytClient.name}: $err")
+                }
+
+                val responseStr = response.body?.string().orEmpty()
+                val json = JSONObject(responseStr)
+                val status = json.optJSONObject("playabilityStatus")
+                val playability = status?.optString("status").orEmpty()
+
+                if (playability.isNotBlank() && playability != "OK") {
+                    val reason = status?.optString("reason").takeUnless { it.isNullOrBlank() }
+                        ?.let { "${ytClient.name}: $it" }
+                        ?: "${ytClient.name}: This video is not playable"
+                    return StreamResult(null, error = reason)
+                }
+
+                val streamingData = json.optJSONObject("streamingData")
+                val streamUrl = streamingData?.let { pickBestPlayableUrl(it, maxBitrate) }
+                if (!streamUrl.isNullOrBlank()) {
+                    Log.d(TAG, "${ytClient.name} stream selected: ${streamUrl.take(80)}")
+                    return StreamResult(streamUrl, source = ytClient.name)
+                }
+
+                StreamResult(null, error = "${ytClient.name}: No direct audio stream was returned")
+            }
+        } catch (e: Exception) {
+            val msg = "${ytClient.name}: ${e.message ?: "Could not fetch stream URL"}"
+            Log.w(TAG, "Innertube client failed: ${ytClient.name}", e)
+            StreamResult(null, error = msg)
+        }
     }
 
     private fun buildPlayerBody(videoId: String, ytClient: YouTubeClient): JSONObject {

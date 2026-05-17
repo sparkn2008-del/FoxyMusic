@@ -22,8 +22,8 @@ object FoxyNetworking {
     fun streamingClient(): OkHttpClient =
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(22, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(16, TimeUnit.SECONDS)
             .let { applyProxy(it) }
             .build()
 }
