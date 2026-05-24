@@ -12,8 +12,12 @@ import 'foxy_startup_splash.dart';
 const _method = MethodChannel('foxy_music/methods');
 const _events = EventChannel('foxy_music/events');
 
-typedef FoxyOnPlay =
-    Future<void> Function(_Song song, List<_Song> queue, {bool radioTail});
+typedef FoxyOnPlay = Future<void> Function(
+  _Song song,
+  List<_Song> queue, {
+  bool radioTail,
+  bool downloadsOnly,
+});
 
 /// Dark UI shell defaults: OLED black canvas, bottom-nav selection fill.
 const Color _kTrueBlack = Color(0xFF000000);
@@ -23,8 +27,8 @@ const double _kCardRadius = 12;
 /// Light black veil on transparent chrome (nav, controls, chips).
 const double _kSubtleBlackTint = 0.10;
 
-String _kAppVersionLabel = 'v1.1';
-String _kAppVersionName = '1.1';
+String _kAppVersionLabel = 'v1.2.1';
+String _kAppVersionName = '1.2.1';
 const String _kGitHubProjectUrl = 'https://github.com/sparkn2008-del/FoxyMusic';
 const String _kAboutCreditLine =
     'Made with ❤️ by Foxy Nish aka sparkn2008-del 🦊✨';
@@ -303,30 +307,6 @@ Color? _argbToColor(dynamic value) {
   return null;
 }
 
-String _playerProgressStyleLabel(int raw) {
-  switch (raw.clamp(0, 3)) {
-    case 0:
-      return 'Default';
-    case 1:
-      return 'Slim';
-    case 2:
-      return 'Wavy';
-    default:
-      return 'Squiggly';
-  }
-}
-
-String _playerSeekMotionLabel(int raw) {
-  switch (raw.clamp(0, 2)) {
-    case 1:
-      return 'Pulse thumb';
-    case 2:
-      return 'Shimmer';
-    default:
-      return 'Static';
-  }
-}
-
 /// Warm fox-fur tones from the FoxyMusic logo (amber → deep orange → cream).
 class _FoxyBrandPalette {
   static const foxAmber = Color(0xFFFF9A3C);
@@ -550,7 +530,7 @@ class _FoxyHomeBackdrop extends StatelessWidget {
   }
 }
 
-/// Translucent surface — does **not** blur the wallpaper (cards, bars, sheets).
+/// Translucent surface with optional clipped backdrop blur for individual panels.
 class _FoxyGlassTint extends StatelessWidget {
   const _FoxyGlassTint({
     required this.child,
@@ -558,6 +538,8 @@ class _FoxyGlassTint extends StatelessWidget {
     this.tintOpacity = 0.28,
     this.borderOpacity = 0.1,
     this.showBottomBorder = false,
+    this.blur = true,
+    this.blurSigma = 14,
   });
 
   final Widget child;
@@ -565,12 +547,14 @@ class _FoxyGlassTint extends StatelessWidget {
   final double tintOpacity;
   final double borderOpacity;
   final bool showBottomBorder;
+  final bool blur;
+  final double blurSigma;
 
   @override
   Widget build(BuildContext context) {
     final radius =
         borderRadius > 0 ? BorderRadius.circular(borderRadius) : null;
-    return DecoratedBox(
+    Widget surface = DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: tintOpacity),
         borderRadius: radius,
@@ -585,6 +569,16 @@ class _FoxyGlassTint extends StatelessWidget {
               ),
       ),
       child: child,
+    );
+    if (!blur) return surface;
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: radius ?? BorderRadius.zero,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+          child: surface,
+        ),
+      ),
     );
   }
 }
@@ -610,7 +604,7 @@ class _FoxyGlassButton extends StatelessWidget {
   final double blurSigma;
   final bool selected;
   final EdgeInsetsGeometry padding;
-  /// Live [BackdropFilter] — only for small fixed chrome (nav, header icons).
+  /// Live clipped [BackdropFilter] for each transparent surface.
   final bool blur;
 
   @override
@@ -748,9 +742,14 @@ void _openSearchResultsPage(
 
 const _homeMoodChips = <String>[
   'All',
+  'Focus',
   'Relax',
   'Sleep',
+  'Drive',
   'Energize',
+  'Bollywood',
+  'Phonk',
+  'Lofi',
   'Sad',
 ];
 
@@ -763,120 +762,6 @@ const _searchFilterChips = <String>[
 ];
 
 enum _HomeSectionLayout { shelf, cards, grid, video, chart, artist }
-
-/// Metrolist-style 2×2 picker (also used from the player overflow menu).
-Future<int?> pickMetrolistSeekBarStyle(
-  BuildContext context, {
-  required int current,
-}) {
-  const previewAccent = Color(0xFFFF5C8D);
-  return showDialog<int>(
-    context: context,
-    builder: (ctx) {
-      final cs = Theme.of(ctx).colorScheme;
-      Widget tile(int style, String label) {
-        final sel = current == style;
-        return Material(
-          color: const Color(0xFF242424),
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () => Navigator.pop(ctx, style),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: sel ? cs.primary : Colors.transparent,
-                  width: 2,
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: 48,
-                    width: double.infinity,
-                    child: CustomPaint(
-                      painter: _MetrolistSeekPainter(
-                        progress: 0.38,
-                        dimmed: false,
-                        style: style,
-                        accent: previewAccent,
-                        motion: 0,
-                        motionPhase: 0,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.88),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }
-
-      return AlertDialog(
-        backgroundColor: const Color(0xFF181818),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-        ),
-        title: Text(
-          'Seek bar style',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.94),
-            fontWeight: FontWeight.w900,
-            fontSize: 18,
-          ),
-        ),
-        content: SizedBox(
-          width: 300,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(child: tile(0, 'Default')),
-                  const SizedBox(width: 10),
-                  Expanded(child: tile(2, 'Wavy')),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(child: tile(1, 'Slim')),
-                  const SizedBox(width: 10),
-                  Expanded(child: tile(3, 'Squiggly')),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: cs.primary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      );
-    },
-  );
-}
 
 String _formatStorageBytes(num bytes) {
   if (bytes < 1024) return '${bytes.toInt()} B';
@@ -927,16 +812,20 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
       }
     });
     _miniPlayerSyncTimer = Timer.periodic(
-      const Duration(milliseconds: 400),
+      const Duration(milliseconds: 700),
       (_) {
         if (!mounted || _nowPlayingSheetOpen) return;
+        final current = _asMap(_player['currentSong']);
+        if (current == null || current['videoId']?.toString().isEmpty != false) {
+          return;
+        }
         unawaited(_syncPlayerFromNativeIfChanged());
       },
     );
   }
 
   void _applyPlayerState(Map<String, dynamic> state) {
-    final next = _detachPlayerState(state);
+    final next = _mergePlayerState(_player, state);
     if (!_playerSnapshotChanged(_player, next)) return;
     setState(() => _player = next);
   }
@@ -952,17 +841,31 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
     if (prev['isBuffering'] != next['isBuffering']) return true;
     if (prev['songIsLiked'] != next['songIsLiked']) return true;
     if (prev['paletteEpoch'] != next['paletteEpoch']) return true;
+    if (prev['canPlayNext'] != next['canPlayNext']) return true;
+    if (prev['canPlayPrevious'] != next['canPlayPrevious']) return true;
+    if (prev['shuffleEnabled'] != next['shuffleEnabled']) return true;
+    if (prev['repeatMode']?.toString() != next['repeatMode']?.toString()) {
+      return true;
+    }
+    if (prev['queueIndex'] != next['queueIndex']) return true;
+    final pQ = prev['queue'];
+    final nQ = next['queue'];
+    if (_queueSignature(pQ) != _queueSignature(nQ)) return true;
     final pVid = _asMap(prev['currentSong'])?['videoId']?.toString() ?? '';
     final nVid = _asMap(next['currentSong'])?['videoId']?.toString() ?? '';
     if (pVid != nVid) return true;
-    final pArt = _asMap(prev['currentSong'])?['artwork']?.toString() ?? '';
-    final nArt = _asMap(next['currentSong'])?['artwork']?.toString() ?? '';
+    final pSong = _asMap(prev['currentSong']) ?? const {};
+    final nSong = _asMap(next['currentSong']) ?? const {};
+    final pTitle = pSong['title']?.toString() ?? '';
+    final nTitle = nSong['title']?.toString() ?? '';
+    if (pTitle != nTitle) return true;
+    final pArtist = pSong['artist']?.toString() ?? '';
+    final nArtist = nSong['artist']?.toString() ?? '';
+    if (pArtist != nArtist) return true;
+    final pArt = _songArtworkKey(pSong);
+    final nArt = _songArtworkKey(nSong);
     if (pArt != nArt) return true;
-    final pOff =
-        _asMap(prev['currentSong'])?['offlineArtworkPath']?.toString() ?? '';
-    final nOff =
-        _asMap(next['currentSong'])?['offlineArtworkPath']?.toString() ?? '';
-    return pOff != nOff;
+    return false;
   }
 
   Future<void> _syncPlayerFromNativeIfChanged() async {
@@ -1084,7 +987,12 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
     }
   }
 
-  Future<void> _playSong(_Song song, List<_Song> queue, {bool radioTail = false}) async {
+  Future<void> _playSong(
+    _Song song,
+    List<_Song> queue, {
+    bool radioTail = false,
+    bool downloadsOnly = false,
+  }) async {
     final songs = queue.isEmpty ? [song] : queue;
     final index = songs.indexWhere((item) => item.videoId == song.videoId);
     final start = math.max(index, 0);
@@ -1105,7 +1013,8 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
     await _method.invokeMethod('playQueue', {
       'songs': songs.map((item) => item.toMap()).toList(),
       'startIndex': start,
-      'radioTail': radioTail,
+      'radioTail': downloadsOnly ? false : radioTail,
+      'offlineQueueOnly': downloadsOnly,
     });
     if (mounted) await _syncPlayerFromNative();
   }
@@ -1155,11 +1064,9 @@ class _FoxyHomeShellState extends State<FoxyHomeShell> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final currentSongMap = _asMap(_player['currentSong']) ?? const {};
-final currentSong = _Song.fromMap(currentSongMap);
+    final currentSong = _Song.fromMap(currentSongMap);
 
-final hasSong = currentSong.videoId.isNotEmpty && currentSong.title.isNotEmpty;
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final miniBottom = bottomInset + 10;
+    final hasSong = currentSong.videoId.isNotEmpty && currentSong.title.isNotEmpty;
     final tabs = [
       _HomeTab(
         key: const PageStorageKey('home-tab'),
@@ -1225,28 +1132,29 @@ final hasSong = currentSong.videoId.isNotEmpty && currentSong.title.isNotEmpty;
             child: const SizedBox.expand(),
           ),
           IndexedStack(index: safeTab, children: tabs),
-          if (hasSong && !_nowPlayingSheetOpen)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: miniBottom),
-                child: _MiniPlayer(
-                  key: ValueKey<Object>(
-                    _player['playerEpoch'] ?? currentSong.videoId,
-                  ),
-                  player: _player,
-                  onOpen: () => _openPlayer(),
-                  onResync: _syncPlayerFromNative,
-                  glass: true,
-                ),
-              ),
-            ),
         ],
       ),
-      bottomNavigationBar: _FoxyBottomNav(
-        selectedIndex: safeTab,
-        onSelected: (index) => setState(() => _tabIndex = index),
-        transparent: true,
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasSong && !_nowPlayingSheetOpen)
+            _MiniPlayer(
+              key: ValueKey<Object>(
+                '${_player['playerEpoch'] ?? 0}-${currentSong.videoId}-${_player['queueIndex'] ?? -1}',
+              ),
+              player: _player,
+              onOpen: () => _openPlayer(),
+              onResync: _syncPlayerFromNative,
+              glass: true,
+              safeArea: false,
+              outerPadding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            ),
+          _FoxyBottomNav(
+            selectedIndex: safeTab,
+            onSelected: (index) => setState(() => _tabIndex = index),
+            transparent: true,
+          ),
+        ],
       ),
     ),
     );
@@ -1359,16 +1267,12 @@ class _FoxyBottomNav extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
         child: transparent
-            ? DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(
-                    alpha: 0.22 + _kSubtleBlackTint,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                  ),
-                ),
+            ? _FoxyGlassTint(
+                borderRadius: 20,
+                tintOpacity: 0.22 + _kSubtleBlackTint,
+                borderOpacity: 0.1,
+                blur: true,
+                blurSigma: 14,
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
@@ -1894,6 +1798,8 @@ class _TopFilterChip extends StatelessWidget {
       child: _FoxyGlassButton(
         onTap: onTap,
         selected: selected,
+        blur: true,
+        blurSigma: 12,
         borderRadius: BorderRadius.circular(28),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
@@ -1925,6 +1831,7 @@ class _FoxySurface extends StatelessWidget {
     this.selected = false,
     this.onTap,
     this.cornerRadius = _kCardRadius,
+    this.frosted = true,
   });
 
   final Widget child;
@@ -1933,6 +1840,7 @@ class _FoxySurface extends StatelessWidget {
   final bool selected;
   final VoidCallback? onTap;
   final double cornerRadius;
+  final bool frosted;
 
   @override
   Widget build(BuildContext context) {
@@ -1944,6 +1852,8 @@ class _FoxySurface extends StatelessWidget {
           borderRadius: cornerRadius,
           tintOpacity: selected ? 0.34 : 0.22,
           borderOpacity: selected ? 0.2 : 0.1,
+          blur: frosted,
+          blurSigma: 12,
           child: Padding(padding: padding, child: child),
         ),
       );
@@ -1955,6 +1865,8 @@ class _FoxySurface extends StatelessWidget {
         selected: selected,
         borderRadius: BorderRadius.circular(cornerRadius),
         padding: padding,
+        blur: frosted,
+        blurSigma: 10,
         child: child,
       ),
     );
@@ -2072,6 +1984,7 @@ class _FoxySongTile extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       onTap: onTap,
+      frosted: false,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2295,7 +2208,24 @@ class _SearchResultsPageState extends State<_SearchResultsPage>
     );
   }
 
-  Widget _tabBody(List<_Song> items, {bool videoStyle = false}) {
+  void _openCollection(_Song item, String kind) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _CollectionDetailPage(
+          seed: item,
+          kind: kind,
+          onPlay: widget.onPlay,
+          onDiscoverSearch: widget.onDiscoverSearch,
+        ),
+      ),
+    );
+  }
+
+  Widget _tabBody(
+    List<_Song> items, {
+    bool videoStyle = false,
+    String kind = 'song',
+  }) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -2320,19 +2250,24 @@ class _SearchResultsPageState extends State<_SearchResultsPage>
       separatorBuilder: (_, __) => const SizedBox(height: 2),
       itemBuilder: (context, index) {
         final song = items[index];
+        final collection = kind == 'album' || kind == 'artist';
         return _FoxySongTile(
           song: song,
           index: index,
           thumbRadius: 12,
           showPlayAndMore: true,
-          trailingIcon: videoStyle
+          trailingIcon: collection
+              ? Icons.arrow_forward_rounded
+              : videoStyle
               ? Icons.play_circle_outline_rounded
               : Icons.play_circle_fill_rounded,
-          onTap: () => widget.onPlay(
-            song,
-            items,
-            radioTail: !videoStyle,
-          ),
+          onTap: collection
+              ? () => _openCollection(song, kind)
+              : () => widget.onPlay(
+                    song,
+                    items,
+                    radioTail: !videoStyle,
+                  ),
           onMore: () => _openMenu(song, items),
         );
       },
@@ -2414,12 +2349,329 @@ class _SearchResultsPageState extends State<_SearchResultsPage>
                 children: [
                   _tabBody(_songs),
                   _tabBody(_videos, videoStyle: true),
-                  _tabBody(_albums),
-                  _tabBody(_artists),
+                  _tabBody(_albums, kind: 'album'),
+                  _tabBody(_artists, kind: 'artist'),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CollectionDetailPage extends StatefulWidget {
+  const _CollectionDetailPage({
+    required this.seed,
+    required this.kind,
+    required this.onPlay,
+    this.onDiscoverSearch,
+  });
+
+  final _Song seed;
+  final String kind;
+  final FoxyOnPlay onPlay;
+  final void Function(String query)? onDiscoverSearch;
+
+  @override
+  State<_CollectionDetailPage> createState() => _CollectionDetailPageState();
+}
+
+class _CollectionDetailPageState extends State<_CollectionDetailPage> {
+  bool _loading = true;
+  String? _error;
+  List<_Song> _songs = const [];
+  List<_Song> _videos = const [];
+  List<_Song> _albums = const [];
+  List<_Song> _artists = const [];
+
+  bool get _isArtist => widget.kind == 'artist';
+
+  String get _title =>
+      _isArtist ? widget.seed.artist.ifBlank(widget.seed.title) : widget.seed.title;
+
+  String get _subtitle => _isArtist ? 'Artist' : widget.seed.artist.ifBlank('Album');
+
+  String get _query {
+    final base = _title.trim();
+    if (_isArtist) return '$base top songs music videos albums';
+    final artist = widget.seed.artist.trim();
+    return [artist, base, 'album songs']
+        .where((part) => part.isNotEmpty)
+        .join(' ');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final response = _asMap(
+            await _method.invokeMethod('searchAll', {
+              'query': _query,
+              'limit': 32,
+            }),
+          ) ??
+          const {};
+      if (!mounted) return;
+      setState(() {
+        _songs = _songsFrom(response['songs']);
+        _videos = _songsFrom(response['videos']);
+        _albums = _songsFrom(response['albums']);
+        _artists = _songsFrom(response['artists']);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _openMenu(_Song song, List<_Song> queue) {
+    showFoxySongOverflowMenu(
+      context,
+      song: song,
+      onPlay: widget.onPlay,
+      queueForPlay: queue.isEmpty ? [song] : queue,
+      onDiscoverSearch: widget.onDiscoverSearch,
+      onLibraryChanged: () async {},
+      searchResultsForExtras: queue.length > 1 ? queue : null,
+    );
+  }
+
+  Widget _section(
+    String title,
+    List<_Song> items, {
+    bool horizontal = false,
+    bool videoStyle = false,
+  }) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    if (horizontal) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _FoxySectionHeader(title: title),
+            SizedBox(
+              height: 184,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: items.take(12).length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return SizedBox(
+                    width: 148,
+                    child: _FoxyGlassButton(
+                      onTap: () => widget.onPlay(item, [item], radioTail: true),
+                      borderRadius: BorderRadius.circular(10),
+                      padding: const EdgeInsets.all(8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: _Artwork(
+                                url: item.highQualityArtwork,
+                                size: 132,
+                                radius: 0,
+                                identityTag: item.videoId,
+                                highQuality: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            item.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _FoxySectionHeader(title: title),
+        for (final entry in items.take(14).toList().asMap().entries)
+          _FoxySongTile(
+            song: entry.value,
+            index: entry.key,
+            thumbRadius: videoStyle ? 10 : 8,
+            trailingIcon: videoStyle
+                ? Icons.play_circle_outline_rounded
+                : Icons.play_circle_fill_rounded,
+            showPlayAndMore: true,
+            onTap: () => widget.onPlay(
+              entry.value,
+              items,
+              radioTail: !videoStyle,
+            ),
+            onMore: () => _openMenu(entry.value, items),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playable = _songs.isNotEmpty ? _songs : _videos;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: _FoxyBrandGradientBackdrop(
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_rounded),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                        _Artwork(
+                          url: widget.seed.highQualityArtwork,
+                          size: 72,
+                          radius: _isArtist ? 999 : 12,
+                          identityTag: widget.seed.videoId,
+                          highQuality: true,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.05,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.58),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: playable.isEmpty
+                              ? null
+                              : () => widget.onPlay(
+                                    playable.first,
+                                    playable,
+                                    radioTail: true,
+                                  ),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: const Text('Play'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      _FoxyGlassButton(
+                        onTap: () => widget.onDiscoverSearch?.call(_query),
+                        borderRadius: BorderRadius.circular(999),
+                        padding: const EdgeInsets.all(12),
+                        child: const Icon(Icons.search_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_loading)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 80),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                )
+              else if (_error != null)
+                SliverToBoxAdapter(
+                  child: _HomeError(message: _error!, onRetry: _load),
+                )
+              else ...[
+                SliverToBoxAdapter(
+                  child: _section(_isArtist ? 'Top songs' : 'Album tracks', _songs),
+                ),
+                SliverToBoxAdapter(
+                  child: _section('Videos', _videos, videoStyle: true),
+                ),
+                if (_isArtist)
+                  SliverToBoxAdapter(
+                    child: _section('Albums and playlists', _albums, horizontal: true),
+                  )
+                else
+                  SliverToBoxAdapter(
+                    child: _section('Related artists', _artists, horizontal: true),
+                  ),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: 110)),
+            ],
+          ),
         ),
       ),
     );
@@ -2566,24 +2818,37 @@ class _SearchTabState extends State<_SearchTab>
     unawaited(_runSearch(query));
   }
 
-  List<({_Song song, bool isArtist})> get _visibleRows {
+  List<({_Song song, String kind})> get _visibleRows {
     switch (_filter) {
       case 'Songs':
-        return _songs.map((s) => (song: s, isArtist: false)).toList();
+        return _songs.map((s) => (song: s, kind: 'song')).toList();
       case 'Videos':
-        return _videos.map((s) => (song: s, isArtist: false)).toList();
+        return _videos.map((s) => (song: s, kind: 'video')).toList();
       case 'Albums':
-        return _albums.map((s) => (song: s, isArtist: false)).toList();
+        return _albums.map((s) => (song: s, kind: 'album')).toList();
       case 'Artists':
-        return _artists.map((s) => (song: s, isArtist: true)).toList();
+        return _artists.map((s) => (song: s, kind: 'artist')).toList();
       default:
         return [
-          ..._artists.map((s) => (song: s, isArtist: true)),
-          ..._songs.map((s) => (song: s, isArtist: false)),
-          ..._videos.map((s) => (song: s, isArtist: false)),
-          ..._albums.map((s) => (song: s, isArtist: false)),
+          ..._artists.map((s) => (song: s, kind: 'artist')),
+          ..._songs.map((s) => (song: s, kind: 'song')),
+          ..._videos.map((s) => (song: s, kind: 'video')),
+          ..._albums.map((s) => (song: s, kind: 'album')),
         ];
     }
+  }
+
+  void _openCollection(_Song item, String kind) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _CollectionDetailPage(
+          seed: item,
+          kind: kind,
+          onPlay: widget.onPlay,
+          onDiscoverSearch: widget.onDiscoverSearch,
+        ),
+      ),
+    );
   }
 
   void _openMenu(_Song song, List<_Song> queue) {
@@ -2630,6 +2895,8 @@ class _SearchTabState extends State<_SearchTab>
                       borderRadius: 28,
                       tintOpacity: 0.52,
                       borderOpacity: 0.16,
+                      blur: true,
+                      blurSigma: 16,
                       child: TextField(
                       controller: _controller,
                       autofocus: false,
@@ -2786,15 +3053,24 @@ class _SearchTabState extends State<_SearchTab>
                 (context, index) {
                   final row = rows[index];
                   final song = row.song;
-                  final queue = row.isArtist ? _artists : _songs;
+                  final kind = row.kind;
+                  final collection = kind == 'artist' || kind == 'album';
+                  final queue = switch (kind) {
+                    'video' => _videos,
+                    'album' => _albums,
+                    'artist' => _artists,
+                    _ => _songs,
+                  };
                   return _SimpMusicSearchRow(
                     song: song,
-                    isArtist: row.isArtist,
-                    onTap: () => widget.onPlay(
-                      song,
-                      queue.isEmpty ? [song] : queue,
-                      radioTail: !row.isArtist,
-                    ),
+                    kind: kind,
+                    onTap: collection
+                        ? () => _openCollection(song, kind)
+                        : () => widget.onPlay(
+                              song,
+                              queue.isEmpty ? [song] : queue,
+                              radioTail: kind != 'video',
+                            ),
                     onMore: () => _openMenu(
                       song,
                       queue.isEmpty ? [song] : queue,
@@ -2813,19 +3089,21 @@ class _SearchTabState extends State<_SearchTab>
 class _SimpMusicSearchRow extends StatelessWidget {
   const _SimpMusicSearchRow({
     required this.song,
-    required this.isArtist,
+    required this.kind,
     required this.onTap,
     required this.onMore,
   });
 
   final _Song song;
-  final bool isArtist;
+  final String kind;
   final VoidCallback onTap;
   final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) {
-    final thumbSize = isArtist ? 52.0 : 52.0;
+    final isArtist = kind == 'artist';
+    final isCollection = kind == 'artist' || kind == 'album';
+    final thumbSize = 52.0;
     Widget leading;
     if (isArtist) {
       leading = ClipOval(
@@ -2875,7 +3153,12 @@ class _SimpMusicSearchRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    isArtist ? 'Artists' : song.artist,
+                    switch (kind) {
+                      'artist' => 'Artist',
+                      'album' => song.artist.ifBlank('Album'),
+                      'video' => song.artist.ifBlank('Video'),
+                      _ => song.artist,
+                    },
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -2887,19 +3170,25 @@ class _SimpMusicSearchRow extends StatelessWidget {
                 ],
               ),
             ),
-            _FoxyGlassButton(
-              onTap: onMore,
-              borderRadius: BorderRadius.circular(999),
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Icon(
-                  Icons.more_vert_rounded,
-                  color: Colors.white.withValues(alpha: 0.88),
+            if (isCollection)
+              Icon(
+                Icons.arrow_forward_rounded,
+                color: Colors.white.withValues(alpha: 0.72),
+              )
+            else
+              _FoxyGlassButton(
+                onTap: onMore,
+                borderRadius: BorderRadius.circular(999),
+                padding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    Icons.more_vert_rounded,
+                    color: Colors.white.withValues(alpha: 0.88),
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -2927,7 +3216,7 @@ class _LibraryRichTile extends StatelessWidget {
     return _FoxyGlassButton(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      blurSigma: 12,
+      tintOpacity: 0.2,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       child: Row(
         children: [
@@ -3025,14 +3314,12 @@ class _MetrolistDownloadsHeaderState extends State<_MetrolistDownloadsHeader> {
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     final bytes = ((_storage['downloadBytes'] ?? 0) as num).toInt();
-  return Padding(
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(_kCardRadius),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
+      child: _FoxyGlassTint(
+        borderRadius: _kCardRadius,
+        tintOpacity: 0.5,
+        borderOpacity: 0.1,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -3247,6 +3534,7 @@ class _LibraryTabState extends State<_LibraryTab>
       queueForPlay: queue,
       onDiscoverSearch: widget.onDiscoverSearch,
       onLibraryChanged: _load,
+      downloadsOnlyPlayback: _scope == _scopeDownloads,
     );
   }
 
@@ -3257,11 +3545,155 @@ class _LibraryTabState extends State<_LibraryTab>
     await playFetchedUserPlaylist(snackContext, p, widget.onPlay);
   }
 
+  Future<void> _openPlaylistSheet(_UserPlaylist p) async {
+    final parentContext = context;
+    var songs = p.songs;
+    if (p.isYoutube && songs.isEmpty) {
+      final raw = await _method.invokeMethod('playlistFetchSongs', {
+        'playlistId': p.id,
+      });
+      songs = _songsFrom(raw);
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: parentContext,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF111111),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.68,
+          maxChildSize: 0.92,
+          builder: (_, scroll) => CustomScrollView(
+            controller: scroll,
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              p.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            Text(
+                              p.isYoutube
+                                  ? '${songs.length} songs · YouTube Music'
+                                  : '${songs.length} songs · On device',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.55),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: songs.isEmpty
+                            ? null
+                            : () => widget.onPlay(songs.first, songs),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                        label: const Text('Play'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (songs.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyTabBody(
+                    icon: Icons.queue_music_rounded,
+                    title: 'Playlist is empty',
+                    subtitle: 'Add songs from the track menu.',
+                  ),
+                )
+              else
+                SliverToBoxAdapter(
+                  child: ReorderableListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    buildDefaultDragHandles: false,
+                    itemCount: songs.length,
+                    onReorder: (oldIndex, newIndex) async {
+                      final adjusted =
+                          newIndex > oldIndex ? newIndex - 1 : newIndex;
+                      final next = List<_Song>.from(songs);
+                      final moved = next.removeAt(oldIndex);
+                      next.insert(adjusted, moved);
+                      setSheetState(() => songs = next);
+                      if (!p.isYoutube) {
+                        await _method.invokeMethod('playlistMoveSong', {
+                          'playlistId': p.id,
+                          'fromIndex': oldIndex,
+                          'toIndex': adjusted,
+                        });
+                        await _load();
+                      }
+                    },
+                    itemBuilder: (context, j) {
+                      final song = songs[j];
+                      return Row(
+                        key: ValueKey('playlist-${p.id}-${song.videoId}'),
+                        children: [
+                          if (!p.isYoutube)
+                            ReorderableDragStartListener(
+                              index: j,
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 12),
+                                child: Icon(
+                                  Icons.drag_indicator_rounded,
+                                  color: Colors.white.withValues(alpha: 0.42),
+                                ),
+                              ),
+                            )
+                          else
+                            const SizedBox(width: 12),
+                          Expanded(
+                            child: _FoxySongTile(
+                              song: song,
+                              index: j,
+                              thumbRadius: 10,
+                              showPlayAndMore: true,
+                              onTap: () => widget.onPlay(song, songs),
+                              onMore: () => _openSongOverflow(
+                                parentContext,
+                                song,
+                                songs,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _shuffleCurrent() {
     final s = _activeSongs;
     if (s.isEmpty) return;
     final list = List<_Song>.from(s)..shuffle(math.Random());
-    widget.onPlay(list.first, list);
+    widget.onPlay(
+      list.first,
+      list,
+      downloadsOnly: _scope == _scopeDownloads,
+    );
   }
 
   Widget _librarySectionTitle(String text) {
@@ -3465,7 +3897,11 @@ class _LibraryTabState extends State<_LibraryTab>
               activeCount: _downloadProgress.length,
               onPlayAll: _downloads.isEmpty
                   ? null
-                  : () => widget.onPlay(_downloads.first, _downloads),
+                  : () => widget.onPlay(
+                        _downloads.first,
+                        _downloads,
+                        downloadsOnly: true,
+                      ),
             ),
           ),
         SliverToBoxAdapter(
@@ -3481,6 +3917,7 @@ class _LibraryTabState extends State<_LibraryTab>
                       child: _FoxyGlassButton(
                         onTap: () => setState(() => _scope = chip.$3),
                         selected: _scope == chip.$3,
+                        tintOpacity: _scope == chip.$3 ? 0.26 : 0.14,
                         borderRadius: BorderRadius.circular(20),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -3579,52 +4016,10 @@ class _LibraryTabState extends State<_LibraryTab>
                     final p = _userPlaylists[i];
                     final art =
                         p.songs.isEmpty ? '' : p.songs.first.artwork;
-                    return Material(
-                      color: const Color(0xFF1E1E1E),
+                    return _FoxyGlassButton(
+                      onTap: () => _openPlaylistSheet(p),
                       borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          if (p.songs.isEmpty) return;
-                          showModalBottomSheet<void>(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: const Color(0xFF111111),
-                            builder: (ctx) => DraggableScrollableSheet(
-                              expand: false,
-                              initialChildSize: 0.65,
-                              maxChildSize: 0.92,
-                              builder: (_, scroll) => ListView(
-                                controller: scroll,
-                                padding: const EdgeInsets.all(12),
-                                children: [
-                                  Text(
-                                    p.name,
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  for (var j = 0; j < p.songs.length; j++)
-                                    _FoxySongTile(
-                                      song: p.songs[j],
-                                      index: j,
-                                      thumbRadius: 10,
-                                      showPlayAndMore: true,
-                                      onTap: () =>
-                                          widget.onPlay(p.songs[j], p.songs),
-                                      onMore: () => _openSongOverflow(
-                                        context,
-                                        p.songs[j],
-                                        p.songs,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
+                      tintOpacity: 0.34,
                         child: SizedBox(
                           width: 200,
                           child: Padding(
@@ -3665,7 +4060,6 @@ class _LibraryTabState extends State<_LibraryTab>
                             ),
                           ),
                         ),
-                      ),
                     );
                   },
                 ),
@@ -3697,7 +4091,11 @@ class _LibraryTabState extends State<_LibraryTab>
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: () => widget.onPlay(songs.first, songs),
+                    onPressed: () => widget.onPlay(
+                      songs.first,
+                      songs,
+                      downloadsOnly: _scope == _scopeDownloads,
+                    ),
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
                     label: const Text('Play'),
                   ),
@@ -3710,14 +4108,10 @@ class _LibraryTabState extends State<_LibraryTab>
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(_kCardRadius),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
+              child: _FoxyGlassTint(
+                borderRadius: _kCardRadius,
+                tintOpacity: 0.2,
+                borderOpacity: 0.08,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
@@ -3815,7 +4209,7 @@ class _LibraryTabState extends State<_LibraryTab>
                               icon: const Icon(Icons.play_arrow_rounded),
                               onPressed: () => _playUserPlaylist(context, p),
                             ),
-                            onTap: () => _playUserPlaylist(context, p),
+                            onTap: () => _openPlaylistSheet(p),
                           ),
                         ),
                       ),
@@ -3851,7 +4245,11 @@ class _LibraryTabState extends State<_LibraryTab>
                   thumbRadius: 12,
                   trailingIcon: Icons.play_circle_fill_rounded,
                   showPlayAndMore: true,
-                  onTap: () => widget.onPlay(song, [song], radioTail: true),
+                  onTap: () => widget.onPlay(
+                    song,
+                    songs,
+                    downloadsOnly: true,
+                  ),
                   onMore: () => _openSongOverflow(context, song, songs),
                 );
               }
@@ -4134,6 +4532,58 @@ List<_UserPlaylist> _userPlaylistsFrom(dynamic raw) =>
         .where((p) => p.id.isNotEmpty)
         .toList();
 
+/// Lightweight menu state (no full [libraryFeed] / network).
+class _SongMenuContext {
+  const _SongMenuContext({
+    required this.likedIds,
+    required this.downloadedIds,
+    required this.userPlaylists,
+    required this.lrclib,
+    required this.lyricsRoman,
+    required this.crossfadeMs,
+    required this.normalizeOn,
+  });
+
+  final Set<String> likedIds;
+  final Set<String> downloadedIds;
+  final List<_UserPlaylist> userPlaylists;
+  final bool lrclib;
+  final bool lyricsRoman;
+  final int crossfadeMs;
+  final bool normalizeOn;
+
+  static _SongMenuContext? _cached;
+  static int _cachedAtMs = 0;
+
+  static void invalidate() {
+    _cached = null;
+    _cachedAtMs = 0;
+  }
+
+  bool get crossfadeOn => crossfadeMs > 0;
+
+  static Future<_SongMenuContext> load() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final cached = _cached;
+    if (cached != null && now - _cachedAtMs < 12000) return cached;
+    final map = _asMap(await _method.invokeMethod('songMenuContext')) ?? const {};
+    final loaded = _SongMenuContext(
+      likedIds: Set<String>.from((map['likedIds'] as List? ?? const []).map((e) => e.toString())),
+      downloadedIds: Set<String>.from(
+        (map['downloadedIds'] as List? ?? const []).map((e) => e.toString()),
+      ),
+      userPlaylists: _userPlaylistsFrom(map['userPlaylists']),
+      lrclib: map['lyricsPreferLrclib'] != false,
+      lyricsRoman: map['lyricsRomanize'] == true,
+      crossfadeMs: ((map['crossfadeMs'] ?? 0) as num).toInt(),
+      normalizeOn: map['normalizeVolume'] == true,
+    );
+    _cached = loaded;
+    _cachedAtMs = now;
+    return loaded;
+  }
+}
+
 Future<void> playFetchedUserPlaylist(
   BuildContext context,
   _UserPlaylist p,
@@ -4194,26 +4644,12 @@ Future<void> showFoxySongOverflowMenu(
   List<_Song>? searchResultsForExtras,
   String bulkQueuePlayTitle = 'Play all search results',
   String bulkQueuePlaySubtitle = 'Keeps the current result order',
+  bool downloadsOnlyPlayback = false,
   VoidCallback? onOpenLyricsTabInPlayer,
-  int? playerProgressStyleForPicker,
-  Future<void> Function(int style)? onPickPlayerProgressStyle,
-  int? playerSeekMotionForPicker,
-  Future<void> Function(int motion)? onPickPlayerSeekMotion,
   bool showRemoveFromQueue = false,
 }) async {
-  final feed = _asMap(await _method.invokeMethod('libraryFeed')) ?? const {};
-  final likedIds =
-      Set<String>.from(_songsFrom(feed['liked']).map((s) => s.videoId));
-  final downloadedIds =
-      Set<String>.from(_songsFrom(feed['downloads']).map((s) => s.videoId));
-  final userPlaylists = _userPlaylistsFrom(feed['userPlaylists']);
-  final appearance = _asMap(await _method.invokeMethod('getAppearance')) ?? const {};
-  final crossfadeMs = ((appearance['crossfadeMs'] ?? 0) as num).toInt();
-  final crossfadeOn = crossfadeMs > 0;
-  final lrclib = appearance['lyricsPreferLrclib'] != false;
-  final lyricsRoman = appearance['lyricsRomanize'] == true;
-  final normalizeOn = appearance['normalizeVolume'] == true;
   if (!context.mounted) return;
+  final menuFuture = _SongMenuContext.load();
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -4221,96 +4657,73 @@ Future<void> showFoxySongOverflowMenu(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (ctx) => SafeArea(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                leading: _Artwork(
-                  url: song.artwork,
-                  size: 52,
-                  radius: 10,
-                  identityTag: song.videoId,
-                ),
-                title: Text(
-                  song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
-                subtitle: Text(
-                  song.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Divider(height: 1),
-              if (onPickPlayerProgressStyle != null &&
-                  playerProgressStyleForPicker != null) ...[
-                ListTile(
-                  leading: const Icon(Icons.linear_scale_rounded),
-                  title: const Text('Progress bar style'),
-                  subtitle: Text(
-                    '${_playerProgressStyleLabel(playerProgressStyleForPicker!)} · '
-                    '${playerSeekMotionForPicker != null ? _playerSeekMotionLabel(playerSeekMotionForPicker!) : 'Static'}',
-                  ),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    if (!context.mounted) return;
-                    final next = await pickMetrolistSeekBarStyle(
-                      context,
-                      current: playerProgressStyleForPicker!,
-                    );
-                    if (next != null && context.mounted) {
-                      await onPickPlayerProgressStyle!(next);
-                    }
-                    if (!context.mounted ||
-                        onPickPlayerSeekMotion == null ||
-                        playerSeekMotionForPicker == null) {
-                      return;
-                    }
-                    final motion = await showDialog<int>(
-                      context: context,
-                      builder: (dCtx) => SimpleDialog(
-                        backgroundColor: const Color(0xFF181818),
-                        title: const Text('Progress animation'),
-                        children: [
-                          for (final e in <(int, String)>[
-                            (0, 'Static'),
-                            (1, 'Pulse thumb'),
-                            (2, 'Shimmer'),
-                          ])
-                            SimpleDialogOption(
-                              onPressed: () => Navigator.pop(dCtx, e.$1),
-                              child: Text(e.$2),
-                            ),
-                        ],
+    builder: (ctx) => FutureBuilder<_SongMenuContext>(
+      future: menuFuture,
+      builder: (context, snap) {
+        final menu = snap.data;
+        final likedIds = menu?.likedIds ?? const <String>{};
+        final downloadedIds = menu?.downloadedIds ??
+            (song.isDownloaded ? {song.videoId} : const <String>{});
+        final userPlaylists = menu?.userPlaylists ?? const <_UserPlaylist>[];
+        final crossfadeMs = menu?.crossfadeMs ?? 0;
+        final crossfadeOn = menu?.crossfadeOn ?? false;
+        final lrclib = menu?.lrclib ?? true;
+        final lyricsRoman = menu?.lyricsRoman ?? false;
+        final normalizeOn = menu?.normalizeOn ?? false;
+        final loading = menu == null;
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(999),
                       ),
-                    );
-                    if (motion != null && context.mounted) {
-                      await onPickPlayerSeekMotion(motion);
-                    }
-                  },
-                ),
-                const Divider(height: 1),
-              ],
-              if (searchResultsForExtras != null &&
+                    ),
+                  ),
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    leading: _Artwork(
+                      url: song.artwork,
+                      size: 52,
+                      radius: 10,
+                      identityTag: song.videoId,
+                    ),
+                    title: Text(
+                      song.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    subtitle: Text(
+                      song.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (loading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: LinearProgressIndicator(
+                        minHeight: 2,
+                        backgroundColor: Color(0xFF2A2A2A),
+                        color: Colors.white54,
+                      ),
+                    ),
+                  if (!loading) ...[
+                    const Divider(height: 1),
+                    if (!downloadsOnlyPlayback &&
+                  searchResultsForExtras != null &&
                   searchResultsForExtras.length > 1) ...[
                 ListTile(
                   leading: const Icon(Icons.podcasts_outlined),
@@ -4430,23 +4843,32 @@ Future<void> showFoxySongOverflowMenu(
               ListTile(
                 leading: const Icon(Icons.album_rounded),
                 title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: const Text('Play this track'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onPlay(song, [song], radioTail: true);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.radio_rounded),
-                title: const Text('Start smart radio'),
-                subtitle: const Text(
-                  'Genre-aware station from this track (Metrolist-style)',
+                subtitle: Text(
+                  downloadsOnlyPlayback
+                      ? 'Play in downloads queue'
+                      : 'Play this track',
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
-                  onPlay(song, [song], radioTail: true);
+                  if (downloadsOnlyPlayback) {
+                    onPlay(song, queueForPlay, downloadsOnly: true);
+                  } else {
+                    onPlay(song, [song], radioTail: true);
+                  }
                 },
               ),
+              if (!downloadsOnlyPlayback)
+                ListTile(
+                  leading: const Icon(Icons.radio_rounded),
+                  title: const Text('Start smart radio'),
+                  subtitle: const Text(
+                    'Genre-aware station from this track (Metrolist-style)',
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onPlay(song, [song], radioTail: true);
+                  },
+                ),
               ListTile(
                 leading: Icon(
                   lrclib ? Icons.lyrics_rounded : Icons.subtitles_rounded,
@@ -4646,27 +5068,33 @@ Future<void> showFoxySongOverflowMenu(
                     });
                   },
                 ),
-              ListTile(
-                leading: const Icon(Icons.ios_share_rounded),
-                title: const Text('Share'),
-                onTap: () async {
-                  final link =
-                      'https://music.youtube.com/watch?v=${song.videoId}';
-                  await Clipboard.setData(ClipboardData(text: link));
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link copied to clipboard')),
-                    );
-                  }
-                },
+                    ListTile(
+                      leading: const Icon(Icons.ios_share_rounded),
+                      title: const Text('Share'),
+                      onTap: () async {
+                        final link =
+                            'https://music.youtube.com/watch?v=${song.videoId}';
+                        await Clipboard.setData(ClipboardData(text: link));
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Link copied to clipboard'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     ),
   );
+  _SongMenuContext.invalidate();
 }
 
 Future<void> _pickPlaylistToAddSong(
@@ -4718,13 +5146,12 @@ Future<void> _pickPlaylistToAddSong(
                 await _method.invokeMethod('playlistCreate', {'name': name});
                 await onChanged?.call();
                 if (!context.mounted) return;
+                final menuCtx = await _SongMenuContext.load();
+                if (!context.mounted) return;
                 await _pickPlaylistToAddSong(
                   context,
                   song: song,
-                  playlists: _userPlaylistsFrom(
-                    (_asMap(await _method.invokeMethod('libraryFeed')) ??
-                            const {})['userPlaylists'],
-                  ),
+                  playlists: menuCtx.userPlaylists,
                   onChanged: onChanged,
                 );
               }
@@ -4845,30 +5272,34 @@ class _AccountSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF181818),
-        borderRadius: BorderRadius.circular(_kCardRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.065)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _StatTile(value: liked, label: 'Liked'),
+    return _FoxyGlassTint(
+      borderRadius: _kCardRadius,
+      tintOpacity: 0.48,
+      borderOpacity: 0.065,
+      blur: true,
+      blurSigma: 16,
+      child: SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Expanded(
+                child: _StatTile(value: liked, label: 'Liked'),
+              ),
+              Expanded(
+                child: _StatTile(value: playlists, label: 'Playlists'),
+              ),
+              Expanded(
+                child: _StatTile(value: downloads, label: 'Downloads'),
+              ),
+              Icon(
+                signedIn ? Icons.verified_rounded : Icons.login_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ],
           ),
-          Expanded(
-            child: _StatTile(value: playlists, label: 'Playlists'),
-          ),
-          Expanded(
-            child: _StatTile(value: downloads, label: 'Downloads'),
-          ),
-          Icon(
-            signedIn ? Icons.verified_rounded : Icons.login_rounded,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -5260,6 +5691,85 @@ class _SettingsSheetState extends State<_SettingsSheet>
     );
   }
 
+  Future<void> _createBackup() async {
+    try {
+      final raw = _asMap(await _method.invokeMethod('createBackup')) ?? const {};
+      if (!mounted) return;
+      final name = raw['fileName']?.toString() ?? 'backup';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backup saved: $name')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backup failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _clearStreamCache() async {
+    try {
+      final raw =
+          _asMap(await _method.invokeMethod('clearStreamCache')) ?? const {};
+      if (!mounted) return;
+      final cleared = ((raw['clearedBytes'] ?? 0) as num).toInt();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cleared ${_formatStorageBytes(cleared)} stream cache'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cache clear failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _restoreLatestBackup() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore latest backup?'),
+        content: const Text(
+          'This replaces local playlists, liked songs, history, and app settings with the latest FoxyMusic backup.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      final raw =
+          _asMap(await _method.invokeMethod('restoreLatestBackup')) ?? const {};
+      if (!mounted) return;
+      final ok = raw['ok'] == true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'Backup restored'
+                : (raw['error']?.toString() ?? 'No backup found'),
+          ),
+        ),
+      );
+      if (ok) Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Restore failed: $e')),
+      );
+    }
+  }
+
   Future<void> _openWebLogin([String mode = 'webview']) async {
     final ok = await _method.invokeMethod('openWebLogin', {'mode': mode}) == true;
     if (!mounted) return;
@@ -5395,10 +5905,9 @@ class _SettingsSheetState extends State<_SettingsSheet>
     final norm = _bool('normalizeVolume');
     final skipSil = _bool('skipSilence');
     final backup = _bool('autoBackupEnabled');
-    final tier = _int('streamQualityTier', 2).clamp(0, 2);
+    final tier = _int('streamQualityTier', 2).clamp(0, 3);
+    final downloadTier = _int('downloadQualityTier', 2).clamp(0, 3);
     final cross = _int('crossfadeMs', 0);
-    final prog = _int('playerProgressStyle', 2).clamp(0, 3);
-    final progMotion = _int('playerSeekMotion', 0).clamp(0, 2);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.88,
@@ -5412,6 +5921,8 @@ class _SettingsSheetState extends State<_SettingsSheet>
             tintOpacity: 0.52,
             borderOpacity: 0.12,
             showBottomBorder: false,
+            blur: true,
+            blurSigma: 18,
             child: Column(
             children: [
               Padding(
@@ -5645,20 +6156,45 @@ class _SettingsSheetState extends State<_SettingsSheet>
               _SettingsCard(
                 title: 'Stream quality',
                 subtitle:
-                    'Caps preferred adaptive bitrate on the Kotlin extractor (low / medium / best).',
+                    'Choose how aggressively FoxyMusic asks YouTube for audio streams.',
                 child: Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: [
                     for (final item in const [
-                      (0, 'Low ~64'),
-                      (1, 'Medium ~128'),
+                      (0, 'Low'),
+                      (1, 'Balanced'),
                       (2, 'High'),
+                      (3, 'Ultra'),
                     ])
                       ChoiceChip(
                         selected: tier == item.$1,
                         label: Text(item.$2),
                         onSelected: (_) =>
                             _apply({'streamQualityTier': item.$1}),
+                      ),
+                  ],
+                ),
+              ),
+              _SettingsCard(
+                title: 'Download quality',
+                subtitle:
+                    'Offline songs use this preference separately from streaming.',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final item in const [
+                      (0, 'Small'),
+                      (1, 'Balanced'),
+                      (2, 'High'),
+                      (3, 'Ultra'),
+                    ])
+                      ChoiceChip(
+                        selected: downloadTier == item.$1,
+                        label: Text(item.$2),
+                        onSelected: (_) =>
+                            _apply({'downloadQualityTier': item.$1}),
                       ),
                   ],
                 ),
@@ -5683,118 +6219,6 @@ class _SettingsSheetState extends State<_SettingsSheet>
                         label: Text(item.$2),
                         onSelected: (_) => _apply({'crossfadeMs': item.$1}),
                       ),
-                  ],
-                ),
-              ),
-              _SettingsCard(
-                title: 'Now playing · seek bar',
-                subtitle:
-                    'Metrolist-style fullscreen player: choose the bar shape in a 2×2 picker, '
-                    'then add motion. Wavy and squiggly use your accent on the played side.',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Bar style',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.78),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Material(
-                      color: const Color(0xFF141414),
-                      borderRadius: BorderRadius.circular(14),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () async {
-                          final v = await pickMetrolistSeekBarStyle(
-                            context,
-                            current: prog,
-                          );
-                          if (v != null && mounted) {
-                            await _apply({'playerProgressStyle': v});
-                          }
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _playerProgressStyleLabel(prog),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Tap to open style gallery',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.5,
-                                        ),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                color: Colors.white.withValues(alpha: 0.45),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Motion & animation',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.78),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Pulse animates the thumb; shimmer adds a soft sweep on the played segment; '
-                      'with Wave or Squiggle, motion also scrolls the waveform.',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.52),
-                        fontSize: 11,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (var i = 0; i < 3; i++)
-                          ChoiceChip(
-                            showCheckmark: false,
-                            selected: progMotion == i,
-                            label: Text(
-                              ['Off', 'Thumb pulse', 'Played shimmer'][i],
-                            ),
-                            onSelected: (_) =>
-                                _apply({'playerSeekMotion': i}),
-                          ),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -5982,8 +6406,36 @@ class _SettingsSheetState extends State<_SettingsSheet>
                   'Auto backup',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
-                subtitle: const Text('UI + persistence only for now'),
+                subtitle: const Text(
+                  'Keeps local JSON snapshots of playlists, liked songs, history, and settings.',
+                ),
                 onChanged: (v) => _apply({'autoBackupEnabled': v}),
+              ),
+              _SettingsCard(
+                title: 'Backup & restore',
+                subtitle:
+                    'Local snapshots stay inside FoxyMusic storage; downloads remain on disk.',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: _createBackup,
+                      icon: const Icon(Icons.backup_rounded, size: 20),
+                      label: const Text('Back up now'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _restoreLatestBackup,
+                      icon: const Icon(Icons.restore_rounded, size: 20),
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(_kCardRadius),
+                        ),
+                      ),
+                      label: const Text('Restore latest'),
+                    ),
+                  ],
+                ),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -6039,6 +6491,16 @@ class _SettingsSheetState extends State<_SettingsSheet>
                       ),
                       child: const Text('System equalizer'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _clearStreamCache,
+                      icon: const Icon(Icons.cleaning_services_rounded, size: 18),
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(_kCardRadius),
+                        ),
+                      ),
+                      label: const Text('Clear stream cache'),
+                    ),
                   ],
                 ),
               ),
@@ -6090,32 +6552,41 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF181818),
-        borderRadius: BorderRadius.circular(_kCardRadius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.065)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.62),
-              fontSize: 12,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _FoxyGlassTint(
+        borderRadius: _kCardRadius,
+        tintOpacity: 0.48,
+        borderOpacity: 0.065,
+        blur: true,
+        blurSigma: 16,
+        child: SizedBox(
+          width: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.62),
+                    fontSize: 12,
+                  ),
+                ),
+                if (child is! SizedBox) ...[const SizedBox(height: 12), child],
+              ],
             ),
           ),
-          if (child is! SizedBox) ...[const SizedBox(height: 12), child],
-        ],
+        ),
       ),
     );
   }
@@ -6143,14 +6614,13 @@ class _SettingsDrawerHeader extends StatelessWidget {
       (Icons.graphic_eq_rounded, 'Audio', 'Quality, crossfade'),
       (Icons.lyrics_rounded, 'Lyrics', 'Provider and animation'),
     ];
-    return Material(
-      color: Colors.white.withValues(alpha: 0.055),
-      borderRadius: BorderRadius.circular(_kCardRadius),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_kCardRadius),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.065)),
-        ),
+    return _FoxyGlassTint(
+      borderRadius: _kCardRadius,
+      tintOpacity: 0.18,
+      borderOpacity: 0.065,
+      blur: true,
+      blurSigma: 16,
+      child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -7281,7 +7751,10 @@ class _HomeGridShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final songs = section.songs.take(8).toList();
+    final songs = section.songs
+        .where((song) => song.videoId.isNotEmpty && song.title.trim().isNotEmpty)
+        .take(8)
+        .toList();
     return Padding(
       padding: const EdgeInsets.only(top: 20, bottom: 8),
       child: Column(
@@ -7306,9 +7779,9 @@ class _HomeGridShelf extends StatelessWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.82,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.76,
               ),
               itemCount: songs.length,
               itemBuilder: (context, index) {
@@ -7346,7 +7819,7 @@ class _HomeGridTile extends StatelessWidget {
       selected: active,
       borderRadius: BorderRadius.circular(10),
       blurSigma: 12,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -7564,6 +8037,7 @@ class _HomeChartShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final songs = section.songs.take(12).toList();
     return Padding(
       padding: const EdgeInsets.only(top: 20, bottom: 8),
       child: Column(
@@ -7582,16 +8056,16 @@ class _HomeChartShelf extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: 148,
+            height: 188,
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               scrollDirection: Axis.horizontal,
-              itemCount: section.songs.length,
+              itemCount: songs.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
-                final song = section.songs[index];
+                final song = songs[index];
                 return SizedBox(
-                  width: 148,
+                  width: 152,
                   child: _FoxyGlassButton(
                     onTap: () => onPlay(song, [song], radioTail: true),
                     borderRadius: BorderRadius.circular(10),
@@ -7603,12 +8077,41 @@ class _HomeChartShelf extends StatelessWidget {
                         Expanded(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: _Artwork(
-                              url: song.highQualityArtwork,
-                              size: 132,
-                              radius: 0,
-                              identityTag: song.videoId,
-                              highQuality: true,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _Artwork(
+                                  url: song.highQualityArtwork,
+                                  size: 136,
+                                  radius: 0,
+                                  identityTag: song.videoId,
+                                  highQuality: true,
+                                ),
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        Colors.black.withValues(alpha: 0.48),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  left: 8,
+                                  bottom: 6,
+                                  child: Text(
+                                    '#${index + 1}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -7899,12 +8402,16 @@ class _MiniPlayer extends StatefulWidget {
     required this.onOpen,
     this.onResync,
     this.glass = false,
+    this.safeArea = true,
+    this.outerPadding = const EdgeInsets.fromLTRB(12, 0, 12, 6),
   });
 
   final Map<String, dynamic> player;
   final VoidCallback onOpen;
   final Future<void> Function()? onResync;
   final bool glass;
+  final bool safeArea;
+  final EdgeInsetsGeometry outerPadding;
 
   @override
   State<_MiniPlayer> createState() => _MiniPlayerState();
@@ -7938,10 +8445,24 @@ class _MiniPlayerState extends State<_MiniPlayer>
   void didUpdateWidget(covariant _MiniPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     final target = _progressFrom(widget.player);
-    if ((target - _progressCtrl.value).abs() > 0.002) {
+    final playing = widget.player['isPlaying'] == true;
+    final d = (target - _progressCtrl.value).abs();
+    if (d <= 0.0005) return;
+    if (playing) {
+      _progressCtrl.stop();
+      if (d > 0.035) {
+        _progressCtrl.animateTo(
+          target,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _progressCtrl.value = target;
+      }
+    } else {
       _progressCtrl.animateTo(
         target,
-        duration: const Duration(milliseconds: 320),
+        duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
       );
     }
@@ -8081,12 +8602,14 @@ class _MiniPlayerState extends State<_MiniPlayer>
       );
     }
 
+    final content = Padding(
+      padding: widget.outerPadding,
+      child: shell,
+    );
+    if (!widget.safeArea) return content;
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-        child: shell,
-      ),
+      child: content,
     );
   }
 }
@@ -8303,8 +8826,6 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   StreamSubscription<dynamic>? _sub;
   final ScrollController _scrollController = ScrollController();
   late int _tab = widget.initialTab;
-  int _progressStyle = 2;
-  int _seekMotion = 0;
   List<_LyricLine> _lyrics = const [];
   String? _lyricsFor;
   bool _lyricsPreferLrclib = true;
@@ -8312,6 +8833,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   bool _lyricsLoading = false;
   double _artworkSwipeDx = 0;
   bool _blurPlayerBackdrop = true;
+  int _lastLightPlayerUiUpdateAtMs = 0;
 
   @override
   void initState() {
@@ -8324,7 +8846,8 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
       if (type == 'playerState') {
         final state = _asMap(map['state']);
         if (state != null && mounted) {
-          final detached = _detachPlayerState(state);
+          final detached = _mergePlayerState(_player, state);
+          if (_shouldSkipLightPlayerUpdate(detached, state)) return;
           setState(() => _player = detached);
           _loadLyricsIfNeeded(detached);
         }
@@ -8340,6 +8863,27 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
     _loadLyricsIfNeeded(_player);
   }
 
+  bool _shouldSkipLightPlayerUpdate(
+    Map<String, dynamic> next,
+    Map<String, dynamic> incoming,
+  ) {
+    if (incoming.containsKey('queue')) return false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final prevSong = _asMap(_player['currentSong'])?['videoId']?.toString();
+    final nextSong = _asMap(next['currentSong'])?['videoId']?.toString();
+    final transportChanged =
+        _player['isPlaying'] != next['isPlaying'] ||
+        _player['isBuffering'] != next['isBuffering'] ||
+        _player['repeatMode'] != next['repeatMode'] ||
+        _player['shuffleEnabled'] != next['shuffleEnabled'] ||
+        prevSong != nextSong;
+    if (transportChanged) return false;
+    if (_tab == 1) return false;
+    if (now - _lastLightPlayerUiUpdateAtMs < 900) return true;
+    _lastLightPlayerUiUpdateAtMs = now;
+    return false;
+  }
+
   @override
   void dispose() {
     _sub?.cancel();
@@ -8350,15 +8894,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   Future<void> _loadAppearance() async {
     final map = _asMap(await _method.invokeMethod('getAppearance'));
     if (!mounted || map == null) return;
-    setState(
-      () {
-        _progressStyle = ((map['playerProgressStyle'] ?? 2) as num)
-            .toInt()
-            .clamp(0, 3);
-        _seekMotion = ((map['playerSeekMotion'] ?? 0) as num).toInt().clamp(0, 2);
-        _blurPlayerBackdrop = map['blurEffects'] != false;
-      },
-    );
+    setState(() => _blurPlayerBackdrop = map['blurEffects'] != false);
   }
 
   Future<void> _refreshPlayerSettings() async {
@@ -8404,11 +8940,6 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
     }
   }
 
-  Future<void> _setProgressStyle(int style) async {
-    setState(() => _progressStyle = style);
-    await _method.invokeMethod('setPlayerProgressStyle', {'style': style});
-  }
-
   void _openMenu(_Song song) {
     final parent = context;
     final onPlay = widget.onPlay;
@@ -8430,18 +8961,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
       onOpenLyricsTabInPlayer: () {
         if (mounted) setState(() => _tab = 1);
       },
-      playerProgressStyleForPicker: _progressStyle,
-      onPickPlayerProgressStyle: _setProgressStyle,
-      playerSeekMotionForPicker: _seekMotion,
-      onPickPlayerSeekMotion: _setSeekMotion,
     );
-  }
-
-  Future<void> _setSeekMotion(int motion) async {
-    setState(() => _seekMotion = motion.clamp(0, 2));
-    await _method.invokeMethod('setAppearance', {
-      'playerSeekMotion': _seekMotion,
-    });
   }
 
   void _showTrackInfo(_Song song) {
@@ -8593,11 +9113,19 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
     final progress = effectiveDurMs <= 0
         ? 0.0
         : (position / effectiveDurMs).clamp(0.0, 1.0);
-    final endTimeLabel =
-        effectiveDurMs > 750 ? _fmt(effectiveDurMs.round()) : '—:—';
+    final int? durMsRounded =
+        effectiveDurMs > 750 ? effectiveDurMs.round() : null;
+    final remMs = durMsRounded == null
+        ? null
+        : math.min(
+            durMsRounded,
+            math.max(0, (effectiveDurMs - position).round()),
+          );
+    final endTimeLabel = remMs == null ? '—' : '-${_fmt(remMs)}';
     final queue = (_player['queue'] as List? ?? const [])
         .map((item) => _Song.fromMap(_asMap(item) ?? const {}))
         .toList();
+    final streamLabel = _streamQualityLabel(_player);
     final queueIndex = ((_player['queueIndex'] ?? -1) as num).toInt();
     final padL = 14.0 + MediaQuery.paddingOf(context).left;
     final padR = 14.0 + MediaQuery.paddingOf(context).right;
@@ -8723,9 +9251,16 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                 final prevEnabled =
                                     _player['canPlayPrevious'] == true ||
                                         queueIndex > 0;
-                                final nextEnabled = queue.isNotEmpty &&
-                                    queueIndex >= 0 &&
-                                    queueIndex < queue.length - 1;
+                                final nextNative = _player['canPlayNext'];
+                                final nextEnabled = nextNative is bool
+                                    ? nextNative as bool
+                                    : (queue.isNotEmpty &&
+                                        (queue.length == 1 ||
+                                            shuffle ||
+                                            (queueIndex >= 0 &&
+                                                queueIndex <
+                                                    queue.length - 1) ||
+                                            repeat == 'All'));
                                 return Column(
                                   children: [
                                     Expanded(
@@ -8818,6 +9353,24 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                         ),
                                                       ),
                                                     ),
+                                                    if (streamLabel.isNotEmpty) ...[
+                                                      const SizedBox(height: 3),
+                                                      Text(
+                                                        streamLabel,
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color: Colors.white
+                                                              .withValues(
+                                                            alpha: 0.48,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ],
                                                 ),
                                               ),
@@ -8956,62 +9509,57 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                 ),
                                               ),
                                             ),
-                                          RepaintBoundary(
-                                            child: _MetrolistSeekBar(
-                                              value: progress,
-                                              enabled: effectiveDurMs > 750,
-                                              style: _progressStyle,
-                                              motion: _seekMotion,
-                                              accent: accent,
-                                              onSeek: (value) =>
-                                                  _method.invokeMethod(
-                                                'seekTo',
-                                                {
-                                                  'positionMs':
-                                                      (effectiveDurMs * value)
-                                                          .round(),
-                                                },
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              _MetrolistSeekBar(
+                                                progress: progress,
+                                                enabled: effectiveDurMs > 750,
+                                                onSeek: (value) =>
+                                                    _method.invokeMethod(
+                                                  'seekTo',
+                                                  {
+                                                    'positionMs':
+                                                        (effectiveDurMs * value)
+                                                            .round(),
+                                                  },
+                                                ),
                                               ),
-                                            ),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              4,
-                                              0,
-                                              4,
-                                              0,
-                                            ),
-                                            child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment
-                                                      .spaceBetween,
-                                              children: [
-                                                Text(
-                                                  _fmt(position.round()),
-                                                  style: const TextStyle(
-                                                    color: _kMetrolistNpTime,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    fontFeatures: [
-                                                      FontFeature
-                                                          .tabularFigures(),
-                                                    ],
+                                              const SizedBox(height: 2),
+                                              Row(
+                                                children: [
+                                                  Text(
+                                                    _fmt(position.round()),
+                                                    style: const TextStyle(
+                                                      color: _kMetrolistNpTime,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontFeatures: [
+                                                        FontFeature
+                                                            .tabularFigures(),
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
-                                                Text(
-                                                  endTimeLabel,
-                                                  style: const TextStyle(
-                                                    color: _kMetrolistNpTime,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    fontFeatures: [
-                                                      FontFeature
-                                                          .tabularFigures(),
-                                                    ],
+                                                  const Spacer(),
+                                                  Text(
+                                                    endTimeLabel,
+                                                    textAlign: TextAlign.right,
+                                                    style: const TextStyle(
+                                                      color: _kMetrolistNpTime,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontFeatures: [
+                                                        FontFeature
+                                                            .tabularFigures(),
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
-                                              ],
-                                            ),
+                                                ],
+                                              ),
+                                            ],
                                           ),
                                           const SizedBox(height: 2),
                                           _SimpMusicPlayerControlLayout(
@@ -9149,260 +9697,6 @@ class _PlayerTabs extends StatelessWidget {
   }
 }
 
-class _MetrolistSeekBar extends StatefulWidget {
-  const _MetrolistSeekBar({
-    required this.value,
-    required this.enabled,
-    required this.style,
-    required this.motion,
-    required this.accent,
-    required this.onSeek,
-  });
-
-  final double value;
-  final bool enabled;
-  final int style;
-  final int motion;
-  final Color accent;
-  final ValueChanged<double> onSeek;
-
-  @override
-  State<_MetrolistSeekBar> createState() => _MetrolistSeekBarState();
-}
-
-class _MetrolistSeekBarState extends State<_MetrolistSeekBar>
-    with TickerProviderStateMixin {
-  late final AnimationController _motionCtrl;
-  late final AnimationController _progressCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    final initial = widget.value.clamp(0.0, 1.0);
-    _progressCtrl = AnimationController(
-      vsync: this,
-      value: initial,
-      duration: const Duration(milliseconds: 280),
-      lowerBound: 0,
-      upperBound: 1,
-    );
-    _motionCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 5000),
-    );
-    _syncMotion();
-  }
-
-  void _syncMotion() {
-    if (widget.motion > 0 || widget.style >= 2) {
-      if (!_motionCtrl.isAnimating) {
-        _motionCtrl.repeat();
-      }
-    } else {
-      _motionCtrl.stop();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _MetrolistSeekBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final target = widget.value.clamp(0.0, 1.0);
-    if ((target - _progressCtrl.value).abs() > 0.001) {
-      _progressCtrl.animateTo(
-        target,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
-    }
-    if (oldWidget.motion != widget.motion || oldWidget.style != widget.style) {
-      _syncMotion();
-    }
-  }
-
-  @override
-  void dispose() {
-    _motionCtrl.dispose();
-    _progressCtrl.dispose();
-    super.dispose();
-  }
-
-  double get _paintHeight {
-    final s = widget.style.clamp(0, 3);
-    if (s == 0) return 32.0;
-    if (s == 1) return 46.0;
-    return 54.0;
-  }
-
-  void _seek(BuildContext context, double dx) {
-    final box = context.findRenderObject() as RenderBox?;
-    final width = box?.size.width ?? 1;
-    widget.onSeek((dx / width).clamp(0.0, 1.0));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final st = widget.style.clamp(0, 3);
-    final mo = widget.motion.clamp(0, 2);
-    Widget buildBar(double phase, double progress) {
-      return CustomPaint(
-        painter: _MetrolistSeekPainter(
-          progress: progress,
-          dimmed: !widget.enabled,
-          style: st,
-          accent: widget.accent,
-          motion: mo,
-          motionPhase: phase,
-        ),
-        child: SizedBox(height: _paintHeight, width: double.infinity),
-      );
-    }
-
-    final content = AnimatedBuilder(
-      animation: Listenable.merge([_motionCtrl, _progressCtrl]),
-      builder: (context, _) => buildBar(
-        _motionCtrl.value,
-        _progressCtrl.value.clamp(0.0, 1.0),
-      ),
-    );
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: widget.enabled
-          ? (d) => _seek(context, d.localPosition.dx)
-          : null,
-      onHorizontalDragUpdate: widget.enabled
-          ? (d) => _seek(context, d.localPosition.dx)
-          : null,
-      child: content,
-    );
-  }
-}
-
-class _MetrolistSeekPainter extends CustomPainter {
-  _MetrolistSeekPainter({
-    required this.progress,
-    required this.dimmed,
-    required this.style,
-    required this.accent,
-    required this.motion,
-    required this.motionPhase,
-  });
-
-  final double progress;
-  final bool dimmed;
-  final int style;
-  final Color accent;
-  final int motion;
-  final double motionPhase;
-
-  static const _inactive = Color(0xFF5C5C5C);
-  static const _active = Colors.white;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final y = size.height / 2;
-    final p = progress.clamp(0.0, 1.0);
-    final inactiveColor = dimmed ? _inactive.withValues(alpha: 0.45) : _inactive;
-    final shimmer = motion == 2 ? (0.72 + 0.28 * math.sin(motionPhase * math.pi * 2)) : 1.0;
-    final useAccent = style >= 2;
-    var activeColor = dimmed
-        ? Colors.white38
-        : (useAccent ? accent : _active);
-    if (motion == 2) {
-      activeColor = activeColor.withValues(alpha: (activeColor.a * shimmer).clamp(0.15, 1.0));
-    }
-
-    if (style == 1) {
-      final trackH = 16.0;
-      final r = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, y - trackH / 2, size.width, trackH),
-        const Radius.circular(999),
-      );
-      canvas.drawRRect(r, Paint()..color = inactiveColor);
-      if (p > 0) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(0, y - trackH / 2, size.width * p, trackH),
-            const Radius.circular(999),
-          ),
-          Paint()..color = activeColor,
-        );
-      }
-    } else if (style == 2 || style == 3) {
-      final inactivePaint = Paint()
-        ..color = inactiveColor
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = 4
-        ..style = PaintingStyle.stroke
-        ..strokeJoin = StrokeJoin.round;
-      final activePaint = Paint()
-        ..color = activeColor
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = 4
-        ..style = PaintingStyle.stroke
-        ..strokeJoin = StrokeJoin.round;
-      final path = Path()..moveTo(0, y);
-      final amp = style == 3 ? 7.0 : 4.0;
-      final freq = style == 3 ? 18.0 : 12.0;
-      // When motion is on, scroll the phase so Wave / Squiggle feel alive (Metrolist-like).
-      // Continuous phase — wave scroll is time-based, not tied to discrete progress ticks.
-      final scroll = motionPhase * math.pi * 2 * 2.0;
-      for (double x = 0; x <= size.width; x += 1.0) {
-        path.lineTo(
-          x,
-          y +
-              math.sin((x / freq) * math.pi * 2 + scroll) * amp,
-        );
-      }
-      canvas.drawPath(path, inactivePaint);
-      canvas.save();
-      canvas.clipRect(Rect.fromLTWH(0, 0, size.width * p, size.height));
-      canvas.drawPath(path, activePaint);
-      canvas.restore();
-    } else {
-      final trackH = 6.0;
-      final full = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, y - trackH / 2, size.width, trackH),
-        const Radius.circular(3),
-      );
-      canvas.drawRRect(full, Paint()..color = inactiveColor);
-      if (p > 0) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(0, y - trackH / 2, size.width * p, trackH),
-            const Radius.circular(2),
-          ),
-          Paint()..color = activeColor,
-        );
-      }
-    }
-
-    final pulse = motion == 1
-        ? (1.0 + 0.35 * math.sin(motionPhase * math.pi * 2))
-        : 1.0;
-    final tw = (3.0 * pulse).clamp(2.5, 5.5);
-    final th = (14.0 * (0.92 + 0.08 * pulse)).clamp(12.0, 17.0);
-    final half = tw / 2 + 1.0;
-    final cx = (size.width * p).clamp(half, size.width - half);
-    final thumb = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(cx, y), width: tw, height: th),
-      Radius.circular(tw / 2),
-    );
-    canvas.drawRRect(
-      thumb,
-      Paint()..color = dimmed ? Colors.white54 : _active,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _MetrolistSeekPainter oldDelegate) =>
-      oldDelegate.progress != progress ||
-      oldDelegate.dimmed != dimmed ||
-      oldDelegate.style != style ||
-      oldDelegate.accent != accent ||
-      oldDelegate.motion != motion ||
-      oldDelegate.motionPhase != motionPhase;
-}
-
 /// Compact frosted-glass action on the now-playing title row (SimpMusic-style).
 class _NpIconAction extends StatelessWidget {
   const _NpIconAction({
@@ -9500,6 +9794,90 @@ class _PlayerBottomToolButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MetrolistSeekBar extends StatelessWidget {
+  const _MetrolistSeekBar({
+    required this.progress,
+    required this.enabled,
+    required this.onSeek,
+  });
+
+  final double progress;
+  final bool enabled;
+  final ValueChanged<double> onSeek;
+
+  void _seek(BuildContext context, double dx) {
+    if (!enabled) return;
+    final box = context.findRenderObject() as RenderBox?;
+    final width = box?.size.width ?? 0;
+    if (width <= 0) return;
+    onSeek((dx / width).clamp(0.0, 1.0));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: enabled ? (d) => _seek(context, d.localPosition.dx) : null,
+      onHorizontalDragUpdate:
+          enabled ? (d) => _seek(context, d.localPosition.dx) : null,
+      child: SizedBox(
+        height: 28,
+        child: CustomPaint(
+          painter: _MetrolistSeekBarPainter(
+            progress: progress.clamp(0.0, 1.0),
+            enabled: enabled,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MetrolistSeekBarPainter extends CustomPainter {
+  const _MetrolistSeekBarPainter({
+    required this.progress,
+    required this.enabled,
+  });
+
+  final double progress;
+  final bool enabled;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final y = size.height / 2;
+    final activeColor = enabled ? Colors.white : Colors.white38;
+    final inactiveColor = const Color(0xFF5C5C5C).withValues(
+      alpha: enabled ? 1 : 0.55,
+    );
+    final trackPaint = Paint()
+      ..color = inactiveColor
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 5;
+    final activePaint = Paint()
+      ..color = activeColor
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 5;
+    canvas.drawLine(Offset.zero.translate(0, y), Offset(size.width, y), trackPaint);
+    if (progress > 0.001) {
+      canvas.drawLine(
+        Offset.zero.translate(0, y),
+        Offset(size.width * progress, y),
+        activePaint,
+      );
+    }
+    final x = (size.width * progress).clamp(2.0, size.width - 2.0);
+    final thumb = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset(x, y), width: 5, height: 18),
+      const Radius.circular(2),
+    );
+    canvas.drawRRect(thumb, Paint()..color = activeColor);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MetrolistSeekBarPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.enabled != enabled;
 }
 
 /// SimpMusic-style transport row: shuffle · previous · large play/pause · next · repeat.
@@ -9810,8 +10188,7 @@ class _AnimatedLyricsListState extends State<_AnimatedLyricsList> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 14),
-        _MetrolistPlayerSectionLabel('Lyrics'),
+        const SizedBox(height: 10),
         SizedBox(
           height: MediaQuery.sizeOf(context).height * 0.68,
           child: ListView.builder(
@@ -9825,10 +10202,10 @@ class _AnimatedLyricsListState extends State<_AnimatedLyricsList> {
               return TweenAnimationBuilder<double>(
                 key: ValueKey('${line.timeMs}-$isActive'),
                 tween: Tween(begin: 0, end: isActive ? 1 : 0),
-                duration: const Duration(milliseconds: 320),
+                duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOutCubic,
                 builder: (context, t, child) {
-                  final scale = 1.0 + (0.055 * t);
+                  final scale = 1.0 + (0.025 * t);
                   return Transform.scale(
                     scale: scale,
                     alignment: Alignment.centerLeft,
@@ -9837,14 +10214,8 @@ class _AnimatedLyricsListState extends State<_AnimatedLyricsList> {
                       curve: Curves.easeOutCubic,
                       margin: const EdgeInsets.symmetric(vertical: 4),
                       padding: EdgeInsets.symmetric(
-                        horizontal: isActive ? 14 : 0,
-                        vertical: isActive ? 12 : 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? widget.accent.withValues(alpha: 0.13)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(14),
+                        horizontal: 0,
+                        vertical: isActive ? 9 : 7,
                       ),
                       child: Text(
                         line.text,
@@ -9854,18 +10225,16 @@ class _AnimatedLyricsListState extends State<_AnimatedLyricsList> {
                               : passed
                               ? Colors.white.withValues(alpha: 0.34)
                               : Colors.white.withValues(alpha: 0.58),
-                          fontSize: isActive ? 25 : 19,
+                          fontSize: isActive ? 24 : 19,
                           height: 1.32,
                           fontWeight: isActive
                               ? FontWeight.w900
                               : FontWeight.w700,
                           shadows: isActive
-                              ? [
+                              ? const [
                                   Shadow(
-                                    color: widget.accent.withValues(
-                                      alpha: 0.65,
-                                    ),
-                                    blurRadius: 18,
+                                    color: Colors.white54,
+                                    blurRadius: 8,
                                   ),
                                 ]
                               : null,
@@ -9927,39 +10296,74 @@ class _QueueTab extends StatelessWidget {
             ),
           )
         else
-          ...queue.asMap().entries.map((entry) {
-            final index = entry.key;
-            final item = entry.value;
-            final active = index == currentIndex;
-            return _FoxySongTile(
-              song: item,
-              index: index,
-              thumbRadius: 10,
-              active: active,
-              onMore: () {
-                final play = onPlay;
-                if (play != null) {
-                  showFoxySongOverflowMenu(
-                    context,
-                    song: item,
-                    onPlay: play,
-                    queueForPlay: queue,
-                    onDiscoverSearch: onDiscoverSearch,
-                    onLibraryChanged: () async {},
-                    showRemoveFromQueue: true,
-                  );
-                } else {
-                  showModalBottomSheet<void>(
-                    context: context,
-                    backgroundColor: const Color(0xFF111111),
-                    builder: (_) => _QueueSongMenu(song: item),
-                  );
-                }
-              },
-              onTap: () =>
-                  _method.invokeMethod('skipToQueueIndex', {'index': index}),
-            );
-          }),
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            proxyDecorator: (child, index, animation) => Material(
+              color: Colors.transparent,
+              child: FadeTransition(opacity: animation, child: child),
+            ),
+            onReorder: (oldIndex, newIndex) {
+              final adjusted = newIndex > oldIndex ? newIndex - 1 : newIndex;
+              _method.invokeMethod('moveQueueItem', {
+                'fromIndex': oldIndex,
+                'toIndex': adjusted,
+              });
+            },
+            itemCount: queue.length,
+            itemBuilder: (context, index) {
+              final item = queue[index];
+              final active = index == currentIndex;
+              return Row(
+                key: ValueKey('queue-${item.videoId}'),
+                children: [
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: Colors.white.withValues(alpha: 0.42),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _FoxySongTile(
+                      song: item,
+                      index: index,
+                      thumbRadius: 10,
+                      active: active,
+                      onMore: () {
+                        final play = onPlay;
+                        if (play != null) {
+                          showFoxySongOverflowMenu(
+                            context,
+                            song: item,
+                            onPlay: play,
+                            queueForPlay: queue,
+                            onDiscoverSearch: onDiscoverSearch,
+                            onLibraryChanged: () async {},
+                            showRemoveFromQueue: true,
+                          );
+                        } else {
+                          showModalBottomSheet<void>(
+                            context: context,
+                            backgroundColor: const Color(0xFF111111),
+                            builder: (_) => _QueueSongMenu(song: item),
+                          );
+                        }
+                      },
+                      onTap: () => _method.invokeMethod(
+                        'skipToQueueIndex',
+                        {'index': index},
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
       ],
     );
   }
@@ -10212,7 +10616,6 @@ class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
       vsync: this,
       duration: const Duration(seconds: 5),
     );
-    _spinning = widget.playing;
     _syncSpin();
   }
 
@@ -10220,9 +10623,7 @@ class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
   void didUpdateWidget(covariant _SpinningDiscOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.playing != widget.playing) {
-      if (widget.playing) {
-        _spinning = true;
-      } else {
+      if (!widget.playing) {
         _spinning = false;
       }
       _syncSpin();
@@ -10573,7 +10974,7 @@ class _BlurBackdrop extends StatelessWidget {
   const _BlurBackdrop({
     required this.url,
     required this.blurEnabled,
-    this.sigma = 56,
+    this.sigma = 34,
     this.offlineArtworkPath,
     this.useOfflineArtwork = false,
     this.fullBleed = false,
@@ -10600,6 +11001,7 @@ class _BlurBackdrop extends StatelessWidget {
     }
 
     final of = offlineFile();
+    final lowResBackdropWidth = fullBleed ? 256 : 320;
     final brandUnderlay = fullBleed
         ? const ColoredBox(color: Color(0xFF050505))
         : _FoxyBrandGradientBackdrop(
@@ -10637,6 +11039,8 @@ class _BlurBackdrop extends StatelessWidget {
             height: double.infinity,
             alignment: Alignment.center,
             gaplessPlayback: true,
+            cacheWidth: lowResBackdropWidth,
+            filterQuality: FilterQuality.low,
             errorBuilder: (_, __, ___) => const ColoredBox(
               color: Color(0xFF080808),
             ),
@@ -10648,6 +11052,8 @@ class _BlurBackdrop extends StatelessWidget {
             height: double.infinity,
             alignment: Alignment.center,
             gaplessPlayback: true,
+            cacheWidth: lowResBackdropWidth,
+            filterQuality: FilterQuality.low,
             errorBuilder: (_, __, ___) => const ColoredBox(
               color: Color(0xFF080808),
             ),
@@ -10656,14 +11062,16 @@ class _BlurBackdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Transform.scale(
-          scale: fullBleed ? 1.35 : 1.18,
-          child: ImageFiltered(
-            imageFilter: ImageFilter.blur(
-              sigmaX: fullBleed ? sigma + 8 : sigma,
-              sigmaY: fullBleed ? sigma + 8 : sigma,
+        RepaintBoundary(
+          child: Transform.scale(
+            scale: fullBleed ? 1.3 : 1.14,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                sigmaX: sigma,
+                sigmaY: sigma,
+              ),
+              child: SizedBox.expand(child: imageChild),
             ),
-            child: SizedBox.expand(child: imageChild),
           ),
         ),
         DecoratedBox(
@@ -10835,6 +11243,33 @@ Map<String, dynamic> _detachPlayerState(Map<String, dynamic> state) {
   return out;
 }
 
+Map<String, dynamic> _mergePlayerState(
+  Map<String, dynamic> previous,
+  Map<String, dynamic> incoming,
+) {
+  final next = _detachPlayerState(incoming);
+  if (next['queue'] == null && previous['queue'] != null) {
+    next['queue'] = previous['queue'];
+  }
+  return next;
+}
+
+String _queueSignature(dynamic queue) {
+  if (queue is! List) return '';
+  return queue
+      .map((dynamic item) => _asMap(item)?['videoId']?.toString() ?? '')
+      .join('|');
+}
+
+String _songArtworkKey(Map<String, dynamic> song) {
+  return [
+    song['artwork']?.toString() ?? '',
+    song['artworkUrl']?.toString() ?? '',
+    song['thumbnail']?.toString() ?? '',
+    song['offlineArtworkPath']?.toString() ?? '',
+  ].join('|');
+}
+
 dynamic _normalize(dynamic value) {
   if (value is Map) return _asMap(value);
   if (value is List) return value.map(_normalize).toList();
@@ -10871,6 +11306,23 @@ String _fmt(int ms) {
     return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
   return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+String _streamQualityLabel(Map<String, dynamic> player) {
+  final codec = player['streamCodec']?.toString() ?? '';
+  final source = player['streamSource']?.toString() ?? '';
+  final bitrate = ((player['streamBitrate'] ?? 0) as num).toInt();
+  final sampleRate = ((player['streamSampleRate'] ?? 0) as num).toInt();
+  final itag = ((player['streamItag'] ?? 0) as num).toInt();
+  final parts = <String>[];
+  if (codec.isNotEmpty) parts.add(codec);
+  if (bitrate > 0) parts.add('${(bitrate / 1000).round()} kbps');
+  if (sampleRate > 0) {
+    parts.add('${(sampleRate / 1000).toStringAsFixed(1)} kHz');
+  }
+  if (itag > 0) parts.add('itag $itag');
+  if (source.isNotEmpty) parts.add(source);
+  return parts.join(' · ');
 }
 
 extension on String {

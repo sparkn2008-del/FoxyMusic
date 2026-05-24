@@ -1,14 +1,12 @@
+import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter, lerpDouble;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-const _kSplashAsset = 'assets/images/foxy_splash.png';
-const _kSplashDuration = Duration(seconds: 4);
-const _kGold = Color(0xFFFFF0D4);
-const _kWarmGlow = Color(0xFFFFE9B8);
+const _kSplashDuration = Duration(milliseconds: 1100);
 
-/// Cinematic cold start using the real Foxy emblem art — no hand-drawn vector fox.
+/// Cold-start splash: simple Metrolist-style black screen with restrained branding.
 class FoxyStartupSplash extends StatefulWidget {
   const FoxyStartupSplash({super.key, required this.onFinished});
 
@@ -18,543 +16,699 @@ class FoxyStartupSplash extends StatefulWidget {
   State<FoxyStartupSplash> createState() => _FoxyStartupSplashState();
 }
 
-class _FoxyStartupSplashState extends State<FoxyStartupSplash>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+class _FoxyStartupSplashState extends State<FoxyStartupSplash> {
+  Timer? _finishFallback;
+  bool _finished = false;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: _kSplashDuration)
-      ..addStatusListener((s) {
-        if (s == AnimationStatus.completed) widget.onFinished();
-      })
-      ..forward();
+    _finishFallback = Timer(_kSplashDuration, _finish);
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _finishFallback?.cancel();
     super.dispose();
   }
 
-  static double _seg(double t, double a, double b) {
-    if (t <= a) return 0;
-    if (t >= b) return 1;
-    return (t - a) / (b - a);
+  void _finish() {
+    if (_finished) return;
+    _finished = true;
+    _finishFallback?.cancel();
+    if (mounted) widget.onFinished();
   }
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
-    final emblemSize = math.min(screen.width * 0.62, 300.0);
-    final center = Offset(screen.width / 2, screen.height / 2);
-
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (context, _) {
-        final t = _ctrl.value;
-
-        final wake = Curves.easeOutCubic.transform(_seg(t, 0.12, 0.40));
-        final turn = Curves.easeInOutCubic.transform(_seg(t, 0.38, 0.52));
-        final run = Curves.easeInCubic.transform(_seg(t, 0.50, 0.94));
-        final star = Curves.easeInOut.transform(_seg(t, 0.30, 0.84));
-        final fadeOut = Curves.easeIn.transform(_seg(t, 0.90, 1.0));
-        final overlay = 1.0 - fadeOut;
-
-        final breathe = 1.0 + math.sin(t * math.pi * 2.8) * 0.016 * (1 - wake * 0.85);
-        final runBob = math.sin(run * math.pi * 11) * 11 * (1 - run * 0.25);
-        final runDx = run * (screen.width + emblemSize * 1.2);
-        return IgnorePointer(
-          ignoring: fadeOut > 0.82,
-          child: Material(
-            color: Colors.black,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Opacity(
-                  opacity: overlay,
-                  child: CustomPaint(
-                    painter: _AmbientStarsPainter(phase: t),
-                  ),
-                ),
-                if (run > 0.08)
-                  Opacity(
-                    opacity: overlay * run * 0.55,
-                    child: CustomPaint(
-                      painter: _SpeedLinesPainter(
-                        origin: center + Offset(runDx * 0.35, runBob),
-                        strength: run,
-                      ),
-                    ),
-                  ),
-                if (star > 0.02)
-                  _RisingMusicStar(
-                    progress: star,
-                    screen: screen,
-                    emblemCenter: center,
-                    opacity: overlay,
-                  ),
-                Center(
-                  child: Transform.translate(
-                    offset: Offset(runDx, runBob),
-                    child: _FoxyEmblemStage(
-                      size: emblemSize,
-                      wake: wake,
-                      turn: turn,
-                      run: run,
-                      breathe: breathe,
-                      opacity: overlay,
-                    ),
-                  ),
-                ),
-              ],
+    return Material(
+      color: const Color(0xFF000000),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              'assets/images/foxy_logo.png',
+              width: 78,
+              height: 78,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
             ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// The real logo with bloom, wake brighten, 3D turn, and motion trails.
-class _FoxyEmblemStage extends StatelessWidget {
-  const _FoxyEmblemStage({
-    required this.size,
-    required this.wake,
-    required this.turn,
-    required this.run,
-    required this.breathe,
-    required this.opacity,
-  });
-
-  final double size;
-  final double wake;
-  final double turn;
-  final double run;
-  final double breathe;
-  final double opacity;
-
-  @override
-  Widget build(BuildContext context) {
-    final brightness = lerpDouble(0.62, 1.18, wake)!;
-    final bloom = lerpDouble(0.25, 1.0, wake)!;
-    final scale = breathe * lerpDouble(0.90, 1.10, wake)!;
-    final rotateY = turn * -1.45;
-    final rotateZ =
-        lerpDouble(-0.06, 0.0, wake)! + math.sin(run * math.pi * 10) * 0.07 * run;
-    final squashY = 1.0 + math.sin(run * math.pi * 10) * 0.04 * run;
-
-    Widget emblem = _EmblemImage(
-      size: size,
-      brightness: brightness,
-      bloom: bloom,
-    );
-
-    if (wake > 0.12) {
-      emblem = Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          emblem,
-          _WakeGlintOverlay(size: size, progress: wake),
-        ],
-      );
-    }
-
-    emblem = Transform(
-      alignment: Alignment.center,
-      transform: Matrix4.identity()
-        ..setEntry(3, 2, 0.002)
-        ..rotateY(rotateY)
-        ..rotateZ(rotateZ)
-        ..scale(scale, scale * squashY),
-      child: emblem,
-    );
-
-    if (run > 0.05) {
-      emblem = Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          for (var i = 5; i >= 1; i--)
-            Opacity(
-              opacity: opacity * (1 - run) * 0.14 * (i / 5),
-              child: Transform.translate(
-                offset: Offset(-i * 22.0 * run, i * 1.5),
-                child: Transform.scale(
-                  scale: 1 - i * 0.018,
-                  child: _EmblemImage(
-                    size: size,
-                    brightness: brightness * 0.85,
-                    bloom: bloom * 0.6,
-                  ),
+            const SizedBox(height: 18),
+            const Text(
+              'FoxyMusic',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0,
+              ),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: 96,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  backgroundColor: Colors.white.withValues(alpha: 0.12),
+                  color: Colors.white.withValues(alpha: 0.78),
                 ),
               ),
             ),
-          Opacity(opacity: opacity, child: emblem),
-        ],
-      );
-    } else {
-      emblem = Opacity(opacity: opacity, child: emblem);
-    }
-
-    return SizedBox(width: size * 1.2, height: size * 1.2, child: emblem);
-  }
-}
-
-class _EmblemImage extends StatelessWidget {
-  const _EmblemImage({
-    required this.size,
-    required this.brightness,
-    required this.bloom,
-  });
-
-  final double size;
-  final double brightness;
-  final double bloom;
-
-  @override
-  Widget build(BuildContext context) {
-    final art = Image.asset(
-      _kSplashAsset,
-      width: size,
-      height: size,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
-      gaplessPlayback: true,
-    );
-
-    return Stack(
-      alignment: Alignment.center,
-      clipBehavior: Clip.none,
-      children: [
-        if (bloom > 0.15)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(
-              sigmaX: 28 * bloom,
-              sigmaY: 28 * bloom,
-            ),
-            child: Opacity(
-              opacity: 0.42 * bloom,
-              child: ColorFiltered(
-                colorFilter: const ColorFilter.mode(
-                  _kWarmGlow,
-                  BlendMode.srcIn,
-                ),
-                child: art,
-              ),
-            ),
-          ),
-        if (bloom > 0.35)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 12 * bloom, sigmaY: 12 * bloom),
-            child: Opacity(
-              opacity: 0.55 * bloom,
-              child: art,
-            ),
-          ),
-        ColorFiltered(
-          colorFilter: ColorFilter.matrix(_brightnessMatrix(brightness)),
-          child: art,
-        ),
-        if (bloom > 0.5)
-          IgnorePointer(
-            child: Container(
-              width: size * 0.72,
-              height: size * 0.72,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    _kWarmGlow.withValues(alpha: 0.14 * bloom),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// Soft eye glints + chest glow when the emblem wakes (over the artwork).
-class _WakeGlintOverlay extends StatelessWidget {
-  const _WakeGlintOverlay({required this.size, required this.progress});
-
-  final double size;
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = Curves.easeOut.transform(progress.clamp(0.0, 1.0));
-    final eyeL = Offset(size * 0.395, size * 0.355);
-    final eyeR = Offset(size * 0.515, size * 0.348);
-
-    return IgnorePointer(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: CustomPaint(
-          painter: _WakeGlintPainter(
-            eyeL: eyeL,
-            eyeR: eyeR,
-            progress: p,
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _WakeGlintPainter extends CustomPainter {
-  const _WakeGlintPainter({
-    required this.eyeL,
-    required this.eyeR,
-    required this.progress,
-  });
-
-  final Offset eyeL;
-  final Offset eyeR;
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (progress <= 0) return;
-
-    for (final eye in [eyeL, eyeR]) {
-      final r = lerpDouble(0.0, 5.5, progress)!;
-      canvas.drawCircle(
-        eye,
-        r * 2.8,
-        Paint()
-          ..color = _kWarmGlow.withValues(alpha: 0.22 * progress)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
-      );
-      canvas.drawCircle(
-        eye,
-        r,
-        Paint()..color = _kGold.withValues(alpha: 0.95 * progress),
-      );
-    }
-
-    final chest = Offset(size.width * 0.44, size.height * 0.48);
-    canvas.drawCircle(
-      chest,
-      18 * progress,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            _kWarmGlow.withValues(alpha: 0.2 * progress),
-            Colors.transparent,
-          ],
-        ).createShader(Rect.fromCircle(center: chest, radius: 22)),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _WakeGlintPainter old) => old.progress != progress;
-}
-
-class _RisingMusicStar extends StatelessWidget {
-  const _RisingMusicStar({
-    required this.progress,
-    required this.screen,
-    required this.emblemCenter,
-    required this.opacity,
-  });
-
-  final double progress;
-  final Size screen;
-  final Offset emblemCenter;
-  final double opacity;
-
-  @override
-  Widget build(BuildContext context) {
-    final start = emblemCenter + Offset(screen.width * 0.06, screen.height * 0.04);
-    final end = Offset(screen.width * 0.5, screen.height * 0.05);
-    final pos = Offset.lerp(start, end, progress)!;
-    final twinkle = 0.55 + 0.45 * math.sin(progress * math.pi * 7);
-    final scale = lerpDouble(1.15, 0.45, progress)!;
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        for (var i = 1; i <= 6; i++)
-          Positioned(
-            left: pos.dx - 4,
-            top: pos.dy + i * 11,
-            child: Opacity(
-              opacity: opacity * (1 - progress) * 0.2 * (1 - i / 7),
-              child: Icon(
-                Icons.star_rounded,
-                size: 6 + i * 1.8,
-                color: _kWarmGlow.withValues(alpha: 0.65),
-              ),
-            ),
-          ),
-        Positioned(
-          left: pos.dx - 28,
-          top: pos.dy - 28,
-          child: Opacity(
-            opacity: opacity * (1 - progress * 0.45) * twinkle,
-            child: Transform.rotate(
-              angle: progress * math.pi * 0.35,
-              child: Transform.scale(
-                scale: scale,
-                child: const _MusicStarNote(size: 56),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Polished glowing note (layered blurs + gradient fill).
-class _MusicStarNote extends StatelessWidget {
-  const _MusicStarNote({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: Size(size, size),
-            painter: _StarBurstPainter(),
-          ),
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Icon(
-              Icons.music_note_rounded,
-              size: size * 0.52,
-              color: _kWarmGlow.withValues(alpha: 0.5),
-            ),
-          ),
-          ShaderMask(
-            shaderCallback: (bounds) => const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFFFFFFF), _kGold, _kWarmGlow],
-            ).createShader(bounds),
-            blendMode: BlendMode.srcIn,
-            child: Icon(
-              Icons.music_note_rounded,
-              size: size * 0.48,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StarBurstPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width / 2, size.height / 2);
-    for (var i = 0; i < 8; i++) {
-      final a = i * math.pi / 4;
-      final p = Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.center,
-          end: Alignment(math.cos(a), math.sin(a)),
-          colors: [
-            _kWarmGlow.withValues(alpha: 0.55),
-            Colors.transparent,
-          ],
-        ).createShader(Rect.fromCircle(center: c, radius: size.width * 0.5));
-      canvas.drawLine(
-        c,
-        c + Offset(math.cos(a) * size.width * 0.42, math.sin(a) * size.width * 0.42),
-        p..strokeWidth = 2.2..strokeCap = StrokeCap.round,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _AmbientStarsPainter extends CustomPainter {
-  const _AmbientStarsPainter({required this.phase});
+/// Deep black field with subtle white vignette pulse.
+class _SplashBackdropPainter extends CustomPainter {
+  _SplashBackdropPainter({required this.phase});
 
   final double phase;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rnd = math.Random(11);
-    final p = Paint();
-    for (var i = 0; i < 48; i++) {
-      final x = rnd.nextDouble() * size.width;
-      final y = rnd.nextDouble() * size.height;
-      final pulse = 0.25 +
-          0.75 * (0.5 + 0.5 * math.sin(phase * math.pi * 4 + i * 1.3));
-      p.color = Colors.white.withValues(alpha: 0.045 * pulse);
-      final r = 0.8 + rnd.nextDouble() * 1.6;
-      canvas.drawCircle(Offset(x, y), r, p);
-      if (i % 9 == 0) {
-        _drawSparkle(canvas, Offset(x, y), 3 + pulse * 2, pulse * 0.35);
-      }
-    }
-  }
-
-  void _drawSparkle(Canvas canvas, Offset c, double r, double a) {
-    final p = Paint()
-      ..color = _kWarmGlow.withValues(alpha: a)
-      ..strokeWidth = 1.2
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(c + Offset(-r, 0), c + Offset(r, 0), p);
-    canvas.drawLine(c + Offset(0, -r), c + Offset(0, r), p);
+    final rect = Offset.zero & size;
+    final pulse = 0.04 + 0.03 * math.sin(phase * math.pi * 2);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = RadialGradient(
+          center: Alignment(0.0, 0.15),
+          radius: 1.1,
+          colors: [
+            const Color(0xFF0A0A0A),
+            const Color(0xFF000000),
+          ],
+        ).createShader(rect),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(0.85, 0.35),
+          radius: 0.55,
+          colors: [
+            Colors.white.withValues(alpha: pulse),
+            Colors.transparent,
+          ],
+        ).createShader(rect),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _AmbientStarsPainter old) => old.phase != phase;
+  bool shouldRepaint(covariant _SplashBackdropPainter old) => old.phase != phase;
 }
 
-class _SpeedLinesPainter extends CustomPainter {
-  const _SpeedLinesPainter({required this.origin, required this.strength});
+/// Glowing white melody trails racing right (ahead of the fox).
+class _MelodyChasePainter extends CustomPainter {
+  _MelodyChasePainter({required this.phase, required this.screen});
 
-  final Offset origin;
-  final double strength;
+  final double phase;
+  final Size screen;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (strength <= 0) return;
-    final rnd = math.Random(3);
-    final p = Paint()
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.4;
-    for (var i = 0; i < 14; i++) {
-      final y = origin.dy + (rnd.nextDouble() - 0.5) * 120;
-      final len = 40 + rnd.nextDouble() * 90;
-      final x0 = origin.dx - len * strength;
-      p.color = _kWarmGlow.withValues(alpha: 0.12 * strength * (0.4 + rnd.nextDouble()));
-      canvas.drawLine(Offset(x0, y), Offset(origin.dx - 12, y), p);
+    final chase = Curves.easeOutCubic.transform(_seg(phase, 0.28, 0.92));
+    if (chase <= 0) return;
+
+    final baseY = size.height * 0.46;
+    final leadX = size.width * (0.48 + chase * 0.78);
+
+    for (var i = 0; i < 10; i++) {
+      final lag = i * 0.038;
+      final noteT = (chase - lag).clamp(0.0, 1.0);
+      if (noteT <= 0) continue;
+
+      final x =
+          leadX - noteT * size.width * 0.32 + math.sin(phase * 10 + i) * 10;
+      final y =
+          baseY + math.sin(phase * math.pi * 3.8 + i * 0.72) * 34 - i * 2.6;
+      final glow = noteT * (0.55 + 0.45 * math.sin(phase * math.pi * 5 + i));
+
+      _drawGlowNote(canvas, Offset(x, y), 10 + i * 0.35, glow);
     }
+
+  }
+
+  void _drawGlowNote(Canvas canvas, Offset c, double size, double intensity) {
+    final core = Colors.white.withValues(alpha: (0.85 * intensity).clamp(0.0, 1.0));
+    canvas.drawCircle(
+      c,
+      size * 0.9,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.25 * intensity)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18),
+    );
+    canvas.drawCircle(c + Offset(size * 0.2, size * 0.25), size * 0.32, Paint()..color = core);
+    final stem = Path()
+      ..moveTo(c.dx, c.dy + size * 0.12)
+      ..lineTo(c.dx + size * 0.05, c.dy - size * 0.7);
+    canvas.drawPath(
+      stem,
+      Paint()
+        ..color = core
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size * 0.14
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  double _seg(double t, double a, double b) {
+    if (t <= a) return 0.0;
+    if (t >= b) return 1.0;
+    return (t - a) / (b - a);
   }
 
   @override
-  bool shouldRepaint(covariant _SpeedLinesPainter old) =>
-      old.origin != origin || old.strength != strength;
+  bool shouldRepaint(covariant _MelodyChasePainter old) =>
+      old.phase != phase || old.screen != screen;
 }
 
-List<double> _brightnessMatrix(double b) {
-  return <double>[
-    b, 0, 0, 0, 0,
-    0, b, 0, 0, 0,
-    0, 0, b, 0, 0,
-    0, 0, 0, 1, 0,
-  ];
+/// Procedural side-view fox with perspective shading (3D-style, no external model).
+class _FoxChasePainter extends CustomPainter {
+  _FoxChasePainter({required this.phase, required this.screen});
+
+  final double phase;
+  final Size screen;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _SplashBackdropPainter(phase: phase).paint(canvas, size);
+    _MelodyChasePainter(phase: phase, screen: screen).paint(canvas, size);
+
+    final groundY = size.height * 0.56;
+    final foxScale = math.min(size.width, size.height) * 0.24;
+    final centerX = _foxCenterX(size.width);
+    final center = Offset(centerX, size.height * 0.56);
+
+    final pose = _foxPose(phase);
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(pose.tilt);
+    canvas.scale(
+      foxScale * pose.scale * pose.squashX,
+      foxScale * pose.scale * 0.92 * pose.squashY,
+    );
+
+    if (pose.running) {
+      _drawRunSmears(canvas, pose.runCycle);
+    }
+    _drawGroundShadow(canvas, pose.runCycle, groundY - center.dy);
+
+    if (pose.sleeping) {
+      _drawSleepingFox(canvas, pose.breath);
+    } else if (pose.waking) {
+      _drawWakingFox(canvas, pose.wakeT);
+    } else {
+      _drawRunningFox(canvas, pose.runCycle, pose.mouthGlow);
+    }
+
+    canvas.restore();
+  }
+
+  _FoxPose _foxPose(double t) {
+    if (t < 0.26) {
+      final breath = 0.5 + 0.5 * math.sin(t * math.pi * 6);
+      return _FoxPose(
+        sleeping: true,
+        breath: breath,
+        scale: 0.95 + breath * 0.03,
+        tilt: -0.08,
+      );
+    }
+    if (t < 0.44) {
+      final wakeT = Curves.easeOutBack.transform(_seg(t, 0.26, 0.44));
+      return _FoxPose(
+        waking: true,
+        wakeT: wakeT,
+        scale: 0.92 + wakeT * 0.14,
+        tilt: -0.05 + wakeT * 0.05,
+      );
+    }
+    final runPhase = Curves.easeInCubic.transform(_seg(t, 0.44, 0.94));
+    final runCycle = (runPhase * 16) % 1.0;
+    final mouthGlow = _seg(t, 0.42, 0.54);
+    final bob = math.sin(runCycle * math.pi * 2);
+    return _FoxPose(
+      running: true,
+      runCycle: runCycle,
+      scale: 1.05 + runPhase * 0.08,
+      tilt: 0.02 + 0.09 * bob,
+      squashX: 1.0 + 0.08 * bob,
+      squashY: 1.0 - 0.05 * bob.abs(),
+      mouthGlow: mouthGlow,
+    );
+  }
+
+  double _foxCenterX(double width) {
+    if (phase < 0.26) return width * 0.32;
+    if (phase < 0.44) {
+      final w = Curves.easeOut.transform(_seg(phase, 0.26, 0.44));
+      return ui.lerpDouble(width * 0.32, width * 0.36, w)!;
+    }
+    final run = Curves.easeInCubic.transform(_seg(phase, 0.44, 0.94));
+    return width * (0.36 + run * 0.92);
+  }
+
+  void _drawGroundShadow(Canvas canvas, double runCycle, double dy) {
+    final stretch = 1.0 + 0.15 * math.sin(runCycle * math.pi * 2);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(0, dy),
+        width: 1.42 * stretch,
+        height: 0.18,
+      ),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.08)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+    );
+  }
+
+  void _drawSleepingFox(Canvas canvas, double breath) {
+    final y = 0.03 + breath * 0.018;
+    _drawTail(
+      canvas,
+      Offset(0.62, y + 0.06),
+      curled: true,
+      thickness: 0.18,
+      alpha: 0.34,
+    );
+    _drawBody(
+      canvas,
+      center: Offset(0.02, y + 0.1),
+      stretch: 0.96,
+      crouch: 0.24,
+      alpha: 0.44,
+      dim: true,
+    );
+    _drawHead(
+      canvas,
+      Offset(-0.63, y + 0.02),
+      0.41,
+      eyesOpen: false,
+      dim: true,
+    );
+    _drawFoldedLeg(canvas, const Offset(-0.18, 0.43), alpha: 0.22);
+    _drawFoldedLeg(canvas, const Offset(0.32, 0.44), alpha: 0.18);
+  }
+
+  void _drawWakingFox(Canvas canvas, double wakeT) {
+    final rise = Curves.easeOutCubic.transform(wakeT);
+    final recoil = math.sin(wakeT * math.pi).clamp(0.0, 1.0);
+    _drawTail(
+      canvas,
+      Offset(0.66, 0.04 - rise * 0.12),
+      curled: wakeT < 0.72,
+      sway: wakeT,
+      thickness: 0.18 + recoil * 0.02,
+      alpha: 0.5 + wakeT * 0.25,
+    );
+    _drawBody(
+      canvas,
+      center: Offset(0.05, 0.08 - rise * 0.16),
+      stretch: 0.98 + rise * 0.12,
+      crouch: 0.2 - rise * 0.08,
+      alpha: 0.58 + rise * 0.28,
+    );
+    _drawHead(
+      canvas,
+      Offset(-0.62 + rise * 0.1, -0.06 - rise * 0.25),
+      0.44 + rise * 0.06,
+      eyesOpen: wakeT > 0.35,
+      eyeGlow: wakeT,
+    );
+    _drawLeg(canvas, const Offset(-0.34, 0.3), -0.45 + rise * 0.9, alpha: 0.45);
+    _drawLeg(canvas, const Offset(0.25, 0.32), 0.55 - rise * 0.75, alpha: 0.38);
+  }
+
+  void _drawRunningFox(Canvas canvas, double cycle, double mouthGlow) {
+    final bounce = math.sin(cycle * math.pi * 2) * 0.06;
+    final stretch = 1.06 + 0.08 * math.sin(cycle * math.pi * 2).abs();
+    _drawTail(
+      canvas,
+      Offset(0.74, -0.08 + bounce * 0.5),
+      curled: false,
+      sway: cycle,
+      thickness: 0.17,
+      alpha: 0.78,
+    );
+    _drawBody(
+      canvas,
+      center: Offset(0.08, bounce),
+      stretch: stretch,
+      crouch: 0.03,
+      alpha: 0.88,
+    );
+
+    final legPhase = cycle * math.pi * 2;
+    _drawLeg(canvas, const Offset(-0.36, 0.27), legPhase, alpha: 0.8);
+    _drawLeg(canvas, const Offset(-0.04, 0.31), legPhase + math.pi, alpha: 0.64);
+    _drawLeg(canvas, const Offset(0.28, 0.27), legPhase + math.pi * 0.5, alpha: 0.76);
+    _drawLeg(canvas, const Offset(0.52, 0.3), legPhase + math.pi * 1.5, alpha: 0.58);
+
+    _drawHead(
+      canvas,
+      Offset(-0.68, -0.18 + bounce),
+      0.48,
+      eyesOpen: true,
+      eyeGlow: 1,
+      mouthGlow: mouthGlow,
+    );
+  }
+
+  void _drawRunSmears(Canvas canvas, double cycle) {
+    final smearPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 0.035
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.025);
+    for (var i = 0; i < 5; i++) {
+      final y = -0.18 + i * 0.13 + math.sin(cycle * math.pi * 2 + i) * 0.018;
+      canvas.drawLine(
+        Offset(-0.98 - i * 0.1, y),
+        Offset(-0.42 - i * 0.08, y - 0.02),
+        smearPaint,
+      );
+    }
+  }
+
+  void _drawBody(
+    Canvas canvas, {
+    required Offset center,
+    required double stretch,
+    required double crouch,
+    required double alpha,
+    bool dim = false,
+  }) {
+    final body = Path()
+      ..moveTo(center.dx - 0.68 * stretch, center.dy + 0.02)
+      ..cubicTo(
+        center.dx - 0.5 * stretch,
+        center.dy - 0.34 - crouch,
+        center.dx + 0.2 * stretch,
+        center.dy - 0.36 - crouch * 0.7,
+        center.dx + 0.66 * stretch,
+        center.dy - 0.08,
+      )
+      ..cubicTo(
+        center.dx + 0.74 * stretch,
+        center.dy + 0.16,
+        center.dx + 0.38 * stretch,
+        center.dy + 0.32,
+        center.dx - 0.12 * stretch,
+        center.dy + 0.3,
+      )
+      ..cubicTo(
+        center.dx - 0.52 * stretch,
+        center.dy + 0.28,
+        center.dx - 0.76 * stretch,
+        center.dy + 0.17,
+        center.dx - 0.68 * stretch,
+        center.dy + 0.02,
+      )
+      ..close();
+
+    _drawSilhouette(canvas, body, alpha: alpha, dim: dim);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.026
+        ..color = Colors.white.withValues(alpha: dim ? 0.16 : 0.32),
+    );
+  }
+
+  void _drawHead(
+    Canvas canvas,
+    Offset c,
+    double r, {
+    required bool eyesOpen,
+    double eyeGlow = 0,
+    double mouthGlow = 0,
+    bool dim = false,
+  }) {
+    final head = Path()
+      ..moveTo(c.dx - r * 0.72, c.dy - r * 0.02)
+      ..cubicTo(
+        c.dx - r * 0.62,
+        c.dy - r * 0.52,
+        c.dx - r * 0.18,
+        c.dy - r * 0.78,
+        c.dx + r * 0.26,
+        c.dy - r * 0.55,
+      )
+      ..cubicTo(
+        c.dx + r * 0.72,
+        c.dy - r * 0.28,
+        c.dx + r * 0.86,
+        c.dy + r * 0.25,
+        c.dx + r * 0.42,
+        c.dy + r * 0.5,
+      )
+      ..cubicTo(
+        c.dx - r * 0.04,
+        c.dy + r * 0.76,
+        c.dx - r * 0.72,
+        c.dy + r * 0.5,
+        c.dx - r * 0.72,
+        c.dy - r * 0.02,
+      )
+      ..close();
+    _drawSilhouette(canvas, head, alpha: dim ? 0.42 : 0.86, dim: dim);
+    final earL = Path()
+      ..moveTo(c.dx - r * 0.55, c.dy - r * 0.55)
+      ..lineTo(c.dx - r * 0.85, c.dy - r * 1.05)
+      ..lineTo(c.dx - r * 0.15, c.dy - r * 0.75)
+      ..close();
+    final earR = Path()
+      ..moveTo(c.dx + r * 0.15, c.dy - r * 0.7)
+      ..lineTo(c.dx + r * 0.35, c.dy - r * 1.1)
+      ..lineTo(c.dx + r * 0.55, c.dy - r * 0.5)
+      ..close();
+    _drawSilhouette(canvas, earL, alpha: dim ? 0.34 : 0.72, dim: dim);
+    _drawSilhouette(canvas, earR, alpha: dim ? 0.34 : 0.72, dim: dim);
+    final earStroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.025
+      ..color = Colors.white.withValues(alpha: 0.35);
+    canvas.drawPath(earL, earStroke);
+    canvas.drawPath(earR, earStroke);
+
+    if (eyesOpen) {
+      for (final ex in [-0.28, 0.12]) {
+        final eye = Offset(c.dx + r * ex, c.dy - r * 0.08);
+        canvas.drawCircle(
+          eye,
+          r * 0.11,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.26 + 0.74 * eyeGlow)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        );
+        canvas.drawCircle(eye, r * 0.07, Paint()..color = Colors.white);
+      }
+    } else {
+      for (final ex in [-0.22, 0.18]) {
+        final eye = Offset(c.dx + r * ex, c.dy - r * 0.02);
+        canvas.drawLine(
+          eye + Offset(-r * 0.1, 0),
+          eye + Offset(r * 0.1, 0),
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.25)
+            ..strokeWidth = 0.04
+            ..strokeCap = StrokeCap.round,
+        );
+      }
+    }
+
+    if (mouthGlow > 0) {
+      canvas.drawCircle(
+        Offset(c.dx + r * 0.45, c.dy + r * 0.12),
+        r * 0.08,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.35 * mouthGlow)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+    }
+
+    final snout = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(c.dx + r * 0.42, c.dy + r * 0.15),
+        width: r * 0.55,
+        height: r * 0.38,
+      ),
+      Radius.circular(r * 0.2),
+    );
+    canvas.drawRRect(snout, Paint()..color = const Color(0xFF060606));
+    canvas.drawRRect(
+      snout,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.018
+        ..color = Colors.white.withValues(alpha: 0.28),
+    );
+  }
+
+  void _drawLeg(Canvas canvas, Offset hip, double phase, {double alpha = 0.7}) {
+    final swing = math.sin(phase) * 0.36;
+    final lift = math.cos(phase).clamp(-1.0, 1.0) * 0.1;
+    final knee = hip + Offset(swing * 0.22, 0.2 - lift.abs() * 0.22);
+    final foot = knee + Offset(swing * 0.22, 0.23 + lift * 0.18);
+    final paint = Paint()
+      ..color = const Color(0xFF050505)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.09
+      ..strokeCap = StrokeCap.round;
+    final glow = Paint()
+      ..color = Colors.white.withValues(alpha: 0.2 * alpha)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.12
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.04);
+    canvas.drawLine(hip, knee, glow);
+    canvas.drawLine(knee, foot, glow);
+    canvas.drawLine(hip, knee, paint);
+    canvas.drawLine(knee, foot, paint);
+    canvas.drawCircle(foot, 0.05, Paint()..color = Colors.white.withValues(alpha: 0.35));
+  }
+
+  void _drawFoldedLeg(Canvas canvas, Offset hip, {double alpha = 0.24}) {
+    final p = Path()
+      ..moveTo(hip.dx, hip.dy)
+      ..quadraticBezierTo(hip.dx + 0.18, hip.dy + 0.08, hip.dx + 0.34, hip.dy)
+      ..quadraticBezierTo(hip.dx + 0.18, hip.dy + 0.14, hip.dx - 0.02, hip.dy + 0.08);
+    canvas.drawPath(
+      p,
+      Paint()
+        ..color = Colors.white.withValues(alpha: alpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.035
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawTail(
+    Canvas canvas,
+    Offset base, {
+    required bool curled,
+    double sway = 0,
+    double thickness = 0.15,
+    double alpha = 0.7,
+  }) {
+    final path = Path()..moveTo(base.dx, base.dy);
+    if (curled) {
+      path.cubicTo(
+        base.dx + 0.52,
+        base.dy - 0.34,
+        base.dx + 0.18,
+        base.dy - 0.72,
+        base.dx - 0.14,
+        base.dy - 0.42,
+      );
+    } else {
+      final w = math.sin(sway * math.pi * 2) * 0.16;
+      path.cubicTo(
+        base.dx + 0.28,
+        base.dy - 0.18 + w,
+        base.dx + 0.55,
+        base.dy - 0.42 - w,
+        base.dx + 0.82,
+        base.dy - 0.16,
+      );
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.16 * alpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = thickness + 0.06
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.06),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFF050505)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = thickness
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.15)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.028,
+    );
+  }
+
+  void _drawSilhouette(
+    Canvas canvas,
+    Path path, {
+    required double alpha,
+    bool dim = false,
+  }) {
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white.withValues(alpha: dim ? 0.08 : 0.16 * alpha)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.06),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF151515),
+            Color(0xFF000000),
+          ],
+        ).createShader(path.getBounds()),
+    );
+  }
+
+  double _seg(double t, double a, double b) {
+    if (t <= a) return 0.0;
+    if (t >= b) return 1.0;
+    return (t - a) / (b - a);
+  }
+
+  @override
+  bool shouldRepaint(covariant _FoxChasePainter old) =>
+      old.phase != phase || old.screen != screen;
+}
+
+class _FoxPose {
+  const _FoxPose({
+    this.sleeping = false,
+    this.waking = false,
+    this.running = false,
+    this.breath = 0,
+    this.wakeT = 0,
+    this.runCycle = 0,
+    this.scale = 1,
+    this.tilt = 0,
+    this.mouthGlow = 0,
+    this.squashX = 1.0,
+    this.squashY = 1.0,
+  });
+
+  final bool sleeping;
+  final bool waking;
+  final bool running;
+  final double breath;
+  final double wakeT;
+  final double runCycle;
+  final double scale;
+  final double tilt;
+  final double mouthGlow;
+  final double squashX;
+  final double squashY;
 }
 
 /// Wraps home and plays splash once per cold start.
@@ -569,6 +723,28 @@ class FoxyAppLaunchGate extends StatefulWidget {
 
 class _FoxyAppLaunchGateState extends State<FoxyAppLaunchGate> {
   bool _showSplash = true;
+  Timer? _splashFallback;
+
+  @override
+  void initState() {
+    super.initState();
+    _splashFallback = Timer(
+      _kSplashDuration + const Duration(milliseconds: 700),
+      _hideSplash,
+    );
+  }
+
+  @override
+  void dispose() {
+    _splashFallback?.cancel();
+    super.dispose();
+  }
+
+  void _hideSplash() {
+    if (!_showSplash) return;
+    _splashFallback?.cancel();
+    if (mounted) setState(() => _showSplash = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -578,9 +754,7 @@ class _FoxyAppLaunchGateState extends State<FoxyAppLaunchGate> {
         widget.child,
         if (_showSplash)
           FoxyStartupSplash(
-            onFinished: () {
-              if (mounted) setState(() => _showSplash = false);
-            },
+            onFinished: _hideSplash,
           ),
       ],
     );
