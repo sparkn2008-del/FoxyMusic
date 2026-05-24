@@ -17,11 +17,14 @@ data class FoxyCustomization(
     val bottomNavScale: Int = 0,
     val gridColumns: Int = 2,
     val showBottomLabels: Boolean = true,
-    val playerProgressStyle: Int = 2,
-    /** 0 = static, 1 = subtle thumb pulse, 2 = soft played-segment shimmer (full player seek bar). */
+    /** Legacy: unused (Flutter uses default Material slider). */
+    val playerProgressStyle: Int = 0,
+    /** Legacy: unused. */
     val playerSeekMotion: Int = 0,
     /** Restore last queue and transport state after the app restarts. */
     val persistentQueue: Boolean = true,
+    /** Keep playing when the app is swiped away from recent tasks. */
+    val continuePlaybackWhenDismissed: Boolean = false,
     /** Default accent: YouTube Music–style red. */
     val accentArgb: Int = 0xFFFF1744.toInt(),
     /** Auto-skip sponsor / promo segments via SponsorBlock. */
@@ -30,8 +33,12 @@ data class FoxyCustomization(
     val crossfadeMs: Int = 0,
     /** Prefer LRCLIB synced lyrics; otherwise try YouTube transcript first. */
     val lyricsPreferLrclib: Boolean = true,
-    /** 0 = low (~64 kbps cap), 1 = medium (~128), 2 = high (best available). */
+    /** Show synced lyrics in Latin / English letters (romanization). */
+    val lyricsRomanize: Boolean = false,
+    /** 0 = low, 1 = balanced, 2 = high, 3 = ultra aggressive. */
     val streamQualityTier: Int = 2,
+    /** Separate preference for offline downloads. */
+    val downloadQualityTier: Int = 2,
     /** BCP-47 tag for catalogue / search bias (stored for future API use). */
     val contentLanguageTag: String = "en-US",
     /** App UI language tag; blank = follow system. */
@@ -89,11 +96,14 @@ object FoxySettings {
     private const val PLAYER_PROGRESS_STYLE = "player_progress_style"
     private const val PLAYER_SEEK_MOTION = "player_seek_motion"
     private const val PERSISTENT_QUEUE = "persistent_queue"
+    private const val CONTINUE_PLAYBACK_DISMISSED = "continue_playback_when_dismissed"
     private const val ACCENT = "accent"
     private const val SPONSOR_BLOCK = "sponsor_block"
     private const val CROSSFADE_MS = "crossfade_ms"
     private const val LYRICS_LRCLIB = "lyrics_lrclib_first"
+    private const val LYRICS_ROMANIZE = "lyrics_romanize"
     private const val STREAM_QUALITY = "stream_quality_tier"
+    private const val DOWNLOAD_QUALITY = "download_quality_tier"
     private const val CONTENT_LANG = "content_language_tag"
     private const val APP_LANG = "app_language_tag"
     private const val PROXY_ON = "proxy_enabled"
@@ -123,9 +133,10 @@ object FoxySettings {
             bottomNavScale = prefs.getInt(BOTTOM_NAV_SCALE, 0).coerceIn(0, 2),
             gridColumns = prefs.getInt(GRID_COLUMNS, 2).coerceIn(2, 4),
             showBottomLabels = prefs.getBoolean(BOTTOM_LABELS, true),
-            playerProgressStyle = prefs.getInt(PLAYER_PROGRESS_STYLE, 2).coerceIn(0, 3),
+            playerProgressStyle = prefs.getInt(PLAYER_PROGRESS_STYLE, 0).coerceIn(0, 3),
             playerSeekMotion = prefs.getInt(PLAYER_SEEK_MOTION, 0).coerceIn(0, 2),
             persistentQueue = prefs.getBoolean(PERSISTENT_QUEUE, true),
+            continuePlaybackWhenDismissed = prefs.getBoolean(CONTINUE_PLAYBACK_DISMISSED, false),
             accentArgb = prefs.getInt(ACCENT, 0xFFFF1744.toInt()),
             sponsorBlockEnabled = prefs.getBoolean(SPONSOR_BLOCK, true),
             crossfadeMs = prefs.getInt(CROSSFADE_MS, 0).let { v ->
@@ -135,7 +146,9 @@ object FoxySettings {
                 }
             },
             lyricsPreferLrclib = prefs.getBoolean(LYRICS_LRCLIB, true),
-            streamQualityTier = prefs.getInt(STREAM_QUALITY, 2).coerceIn(0, 2),
+            lyricsRomanize = prefs.getBoolean(LYRICS_ROMANIZE, false),
+            streamQualityTier = prefs.getInt(STREAM_QUALITY, 2).coerceIn(0, 3),
+            downloadQualityTier = prefs.getInt(DOWNLOAD_QUALITY, 2).coerceIn(0, 3),
             contentLanguageTag = prefs.getString(CONTENT_LANG, "en-US") ?: "en-US",
             appLanguageTag = prefs.getString(APP_LANG, "").orEmpty(),
             proxyEnabled = prefs.getBoolean(PROXY_ON, false),
@@ -169,11 +182,14 @@ object FoxySettings {
             ?.putInt(PLAYER_PROGRESS_STYLE, next.playerProgressStyle.coerceIn(0, 3))
             ?.putInt(PLAYER_SEEK_MOTION, next.playerSeekMotion.coerceIn(0, 2))
             ?.putBoolean(PERSISTENT_QUEUE, next.persistentQueue)
+            ?.putBoolean(CONTINUE_PLAYBACK_DISMISSED, next.continuePlaybackWhenDismissed)
             ?.putInt(ACCENT, next.accentArgb)
             ?.putBoolean(SPONSOR_BLOCK, next.sponsorBlockEnabled)
             ?.putInt(CROSSFADE_MS, next.crossfadeMs)
             ?.putBoolean(LYRICS_LRCLIB, next.lyricsPreferLrclib)
-            ?.putInt(STREAM_QUALITY, next.streamQualityTier)
+            ?.putBoolean(LYRICS_ROMANIZE, next.lyricsRomanize)
+            ?.putInt(STREAM_QUALITY, next.streamQualityTier.coerceIn(0, 3))
+            ?.putInt(DOWNLOAD_QUALITY, next.downloadQualityTier.coerceIn(0, 3))
             ?.putString(CONTENT_LANG, next.contentLanguageTag)
             ?.putString(APP_LANG, next.appLanguageTag)
             ?.putBoolean(PROXY_ON, next.proxyEnabled)

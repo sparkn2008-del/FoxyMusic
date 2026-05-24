@@ -135,7 +135,7 @@ class FoxyMediaSessionService : MediaSessionService() {
             return START_STICKY
         }
         scheduleNotificationRefresh()
-        return super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -337,21 +337,20 @@ class FoxyMediaSessionService : MediaSessionService() {
     }.getOrNull()
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        val session = MusicPlayer.mediaSession ?: run {
+        val continueInBackground = FoxySettings.state.value.continuePlaybackWhenDismissed
+        val session = MusicPlayer.mediaSession
+        if (!continueInBackground) {
+            session?.player?.pause()
             stopSelf()
             return
         }
-        val p = session.player
-        // Keep the foreground media service alive while the user expects playback to continue
-        // (including buffering with playWhenReady true).
-        val keepAlive =
-            p.playWhenReady ||
-                p.isPlaying ||
-                p.playbackState == Player.STATE_BUFFERING
-        if (!keepAlive) {
+        if (session == null) {
             stopSelf()
+            return
         }
+        // Stay foreground so OEMs do not kill playback when the task is cleared from recents.
+        runCatching { promoteToForeground("onTaskRemoved") }
+        scheduleNotificationRefresh()
     }
 
     companion object {

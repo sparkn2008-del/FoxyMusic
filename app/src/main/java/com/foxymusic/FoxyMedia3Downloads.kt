@@ -300,23 +300,7 @@ object FoxyMedia3Downloads {
 
         ensureInitialized(context)
 
-        val meta = JSONObject().apply {
-
-            put("videoId", song.videoId)
-
-            put("title", song.title)
-
-            put("artist", song.artist)
-
-            put("thumbnail", song.thumbnail)
-
-            put("artworkUrl", song.artworkUrl ?: "")
-
-            put("duration", song.duration ?: "")
-
-            put("album", song.album ?: "")
-
-        }
+        val meta = FoxyOfflineBundle.songToDownloadPayload(song)
 
         val request = DownloadRequest.Builder(song.videoId, android.net.Uri.parse(uri))
 

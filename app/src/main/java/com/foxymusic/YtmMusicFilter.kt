@@ -202,6 +202,43 @@ object YtmMusicFilter {
 
 
 
+    /**
+     * Relaxed filter for home, search, and library browsing — shows normal tracks even when
+     * duration is missing or the title contains "mix"/"radio". Queue/autoplay still uses
+     * [isMusicQueueTrack].
+     */
+    /** Hard rejects for browse/search parsing (podcasts, audiobooks, etc.). */
+    fun isObviouslyNonPlayable(title: String, artist: String): Boolean {
+        val blob = "${title.trim().lowercase(Locale.US)} ${artist.trim().lowercase(Locale.US)}"
+        if (blob.isBlank()) return true
+        if (blob.contains("podcast")) return true
+        if (blob.contains("audiobook")) return true
+        if (blob.contains("full episode")) return true
+        return false
+    }
+
+    fun isCatalogTrack(title: String, artist: String, duration: String? = null): Boolean {
+        val t = title.trim()
+        if (t.isBlank()) return false
+        val blob = "${t.lowercase(Locale.US)} ${artist.trim().lowercase(Locale.US)}"
+        if (blob.contains("podcast")) return false
+        if (blob.contains("audiobook")) return false
+        if (blob.contains("full episode")) return false
+        if (Regex("""\bepisode\s+\d+""", RegexOption.IGNORE_CASE).containsMatchIn(blob)) {
+            return false
+        }
+        if (blob.contains(" full album")) return false
+        // Drop obvious non-song tiles (playlist hub rows), not every "mix" search result.
+        if (blob.contains("playlist") && artist.equals("YouTube Music", ignoreCase = true) &&
+            !blob.contains("song")
+        ) {
+            return false
+        }
+        val ms = parseDurationToMs(duration)
+        if (ms != null && ms > MAX_QUEUE_TRACK_MS * 6) return false
+        return true
+    }
+
     fun isMusicQueueTrack(title: String, artist: String, duration: String? = null): Boolean {
 
         val t = title.trim()
@@ -412,7 +449,18 @@ fun Song.isMusicQueueTrack(): Boolean =
 
 
 
+fun Song.isCatalogTrack(): Boolean =
+
+    YtmMusicFilter.isCatalogTrack(title, artist, duration)
+
+
+
 fun List<Song>.musicQueueTracksOnly(): List<Song> = filter { it.isMusicQueueTrack() }
+
+
+
+/** Home / search / library lists — not the autoplay queue. */
+fun List<Song>.catalogTracksOnly(): List<Song> = filter { it.isCatalogTrack() }
 
 /** True when catalog metadata shows a track longer than the queue cap. */
 fun Song.exceedsQueueDurationCap(): Boolean {

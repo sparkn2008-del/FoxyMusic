@@ -27,5 +27,26 @@ object FoxyCache {
             return created
         }
     }
+
+    fun clear(context: Context): Long {
+        val dir = File(context.applicationContext.cacheDir, "media_cache")
+        val before = dir.sizeBytes()
+        synchronized(this) {
+            runCatching { cache?.release() }
+            cache = null
+            runCatching { dir.deleteRecursively() }
+            dir.mkdirs()
+        }
+        return before
+    }
+}
+
+private fun File.sizeBytes(): Long {
+    if (!exists()) return 0L
+    var total = 0L
+    walkTopDown().forEach { f ->
+        if (f.isFile) total += f.length()
+    }
+    return total
 }
 
