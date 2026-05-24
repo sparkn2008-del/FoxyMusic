@@ -1,0 +1,6 @@
+# Copy to key.properties at repo root and fill in real values.
+# storeFile is relative to this repo root (same folder as key.properties).
+storePassword=
+keyPassword=
+keyAlias=
+storeFile=foxy-upload.jks

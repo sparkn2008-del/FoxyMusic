@@ -43,6 +43,12 @@ From the repository root:
 .\gradlew.bat assembleRelease
 ```
 
+| Output | Path |
+|--------|------|
+| Debug APKs | `app\build\outputs\apk\debug\` |
+| Release APKs | `app\build\outputs\apk\release\` |
+| Play bundle | `app\build\outputs\bundle\release\app-release.aab` |
+
 Release signing uses `key.properties` when present; otherwise the project may sign release builds with the debug key until you configure a keystore (see `app/build.gradle`).
 
 ---

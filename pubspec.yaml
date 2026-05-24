@@ -15,7 +15,7 @@ description: "A new Flutter module project."
 # This version is used _only_ for the Runner app, which is used if you just do
 # a `flutter run`. It has no impact on any other native host app that you embed
 # your Flutter project into.
-version: 1.0.0+3
+version: 1.2.1+5
 
 environment:
   sdk: ^3.11.5
@@ -46,6 +46,7 @@ flutter:
     - assets/images/foxy_home_bg.png
     - assets/images/foxy_logo.png
     - assets/images/foxy_splash.png
+    - assets/images/splash/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
