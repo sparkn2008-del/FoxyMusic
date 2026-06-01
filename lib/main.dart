@@ -36,10 +36,10 @@ const String _kAboutCreditLine =
     'Made with ❤️ by Foxy Nish aka sparkn2008-del 🦊✨';
 const String _kFoxyLogoAsset = 'assets/images/foxy_logo.png';
 
-/// Metrolist-style now playing foreground (backdrop stays full-bleed [_BlurBackdrop]).
-const Color _kMetrolistNpSurface = Color(0xFF2E2E30);
-const Color _kMetrolistNpSurfaceHigh = Color(0xFF3D3D42);
-const Color _kMetrolistNpTime = Color(0xFF9E9E9E);
+/// Foxy-style now playing foreground (backdrop stays full-bleed [_BlurBackdrop]).
+const Color _kFoxyNpSurface = Color(0xFF2E2E30);
+const Color _kFoxyNpSurfaceHigh = Color(0xFF3D3D42);
+const Color _kFoxyNpTime = Color(0xFF9E9E9E);
 
 Color _miniPlayerTint(Color accent) {
   return Color.alphaBlend(
@@ -1494,8 +1494,8 @@ class _HomeTopBar extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const _FoxyAppLogo(size: 36, borderRadius: 10, showGlow: false),
-                const SizedBox(width: 10),
+                const _FoxyAppLogo(size: 38, borderRadius: 12, showGlow: false),
+                const SizedBox(width: 11),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1610,10 +1610,10 @@ class _GlassIconButton extends StatelessWidget {
 String _homeGreeting() {
   final h = DateTime.now().hour;
   if (h < 5) return 'Up late';
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  if (h < 22) return 'Good evening';
-  return 'Wind down';
+  if (h < 12) return 'Good morning...';
+  if (h < 17) return 'Good afternoon...';
+  if (h < 22) return 'Good evening...';
+  return 'Wind down...';
 }
 
 /// Plain header for Library / Downloads (not the YT-style home hero).
@@ -2737,7 +2737,7 @@ class _SearchTabState extends State<_SearchTab>
           _asMap(
             await _method.invokeMethod('searchAll', {
               'query': query,
-              'limit': 24,
+              'limit': 36,
             }),
           ) ??
           const {};
@@ -3071,7 +3071,7 @@ class _SimpMusicSearchRow extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2.83),
       child: _FoxyGlassButton(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
@@ -3091,11 +3091,11 @@ class _SimpMusicSearchRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 16,
+                      fontSize: 15.5,
                       color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     switch (kind) {
                       'artist' => 'Artist',
@@ -3107,7 +3107,7 @@ class _SimpMusicSearchRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.52),
-                      fontSize: 13,
+                      fontSize: 12.56,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -3211,9 +3211,9 @@ class _LibraryRichTile extends StatelessWidget {
   }
 }
 
-/// Metrolist-style downloads summary (storage + offline count).
-class _MetrolistDownloadsHeader extends StatefulWidget {
-  const _MetrolistDownloadsHeader({
+/// Foxy-style downloads summary (storage + offline count).
+class _FoxyDownloadsHeader extends StatefulWidget {
+  const _FoxyDownloadsHeader({
     required this.songCount,
     required this.activeCount,
     this.onPlayAll,
@@ -3224,11 +3224,11 @@ class _MetrolistDownloadsHeader extends StatefulWidget {
   final VoidCallback? onPlayAll;
 
   @override
-  State<_MetrolistDownloadsHeader> createState() =>
-      _MetrolistDownloadsHeaderState();
+  State<_FoxyDownloadsHeader> createState() =>
+      _FoxyDownloadsHeaderState();
 }
 
-class _MetrolistDownloadsHeaderState extends State<_MetrolistDownloadsHeader> {
+class _FoxyDownloadsHeaderState extends State<_FoxyDownloadsHeader> {
   Map<String, dynamic> _storage = const {};
   bool _loading = true;
 
@@ -3398,22 +3398,30 @@ class _LibraryTabState extends State<_LibraryTab>
     super.dispose();
   }
 
-  Future<void> _load() async {
-    final response =
-        _asMap(await _method.invokeMethod('libraryFeed')) ?? const {};
-    if (!mounted) return;
-    setState(() {
-      _liked = _songsFrom(response['liked']);
-      _history = _songsFrom(response['history']);
-      _downloads = _songsFrom(response['downloads']);
-      _local = _songsFrom(response['local']);
-      _mostPlayed = _songsFrom(response['mostPlayed']);
-      _recentlyAdded = _songsFrom(response['recentlyAdded']);
-      _userPlaylists = _userPlaylistsFrom(response['userPlaylists']);
-      _loading = false;
-    });
-  }
+    Future<void> _load() async {
+  final response =
+      _asMap(await _method.invokeMethod('libraryFeed')) ?? const {};
+  if (!mounted) return;
 
+  List<_Song> downloads = _songsFrom(response['downloads']);
+
+  // Sort downloads by newest first (descending order) - newest at top
+  downloads.sort((a, b) {
+    // Simple stable sort: reverse order of videoId (newer IDs tend to be larger)
+    return b.videoId.compareTo(a.videoId);
+  });
+
+  setState(() {
+    _liked = _songsFrom(response['liked']);
+    _history = _songsFrom(response['history']);
+    _downloads = downloads;
+    _local = _songsFrom(response['local']);
+    _mostPlayed = _songsFrom(response['mostPlayed']);
+    _recentlyAdded = _songsFrom(response['recentlyAdded']);
+    _userPlaylists = _userPlaylistsFrom(response['userPlaylists']);
+    _loading = false;
+  });
+}
   bool get _hub => _scope == _scopeHub;
 
   List<_Song> get _activeSongs {
@@ -3451,7 +3459,7 @@ class _LibraryTabState extends State<_LibraryTab>
         return 'Your playlists';
       default:
         return _recentlyAdded.isNotEmpty
-            ? 'Recently added'
+            ? 'Recently played'
             : 'Recommended for you';
     }
   }
@@ -3860,7 +3868,7 @@ class _LibraryTabState extends State<_LibraryTab>
         ),
         if (_scope == _scopeDownloads)
           SliverToBoxAdapter(
-            child: _MetrolistDownloadsHeader(
+            child: _FoxyDownloadsHeader(
               songCount: _downloads.length,
               activeCount: _downloadProgress.length,
               onPlayAll: _downloads.isEmpty
@@ -4848,7 +4856,7 @@ Future<void> showFoxySongOverflowMenu(
                         leading: const Icon(Icons.radio_rounded),
                         title: const Text('Start smart radio'),
                         subtitle: const Text(
-                          'Genre-aware station from this track (Metrolist-style)',
+                          'Genre-aware station from this track (Foxy-style)',
                         ),
                         onTap: () {
                           Navigator.pop(ctx);
@@ -5468,8 +5476,8 @@ class _AboutUsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         Text(
-          'Your fox-themed YouTube Music player — playback, queues, and '
-          'library on-device with a Flutter UI and Kotlin engine.',
+          'A foss YouTube Music client with Soundcloud integration  — playback, queues, and '
+          'library on-device with a Flutter UI and Kotlin engine',
           textAlign: TextAlign.center,
           style: TextStyle(color: muted, height: 1.4, fontSize: 14),
         ),
@@ -6077,7 +6085,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'App background',
                             subtitle:
-                                'Default stays plain black. Custom image is optional.',
+                                'Default stays plain black. Custom image is lets you choose your own Backgorund.',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -6087,7 +6095,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                                   title: const Text('Use custom background'),
                                   subtitle: Text(
                                     hasCustomBg
-                                        ? 'Enabled on Home, Search, and Library'
+                                        ? 'Enabled on Home, Search, and Library Tabs'
                                         : 'Choose an image first',
                                   ),
                                   onChanged: hasCustomBg
@@ -6114,7 +6122,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                                     Icons.restart_alt_rounded,
                                     size: 20,
                                   ),
-                                  label: const Text('Remove custom image'),
+                                  label: const Text('Remove custom Background'),
                                 ),
                               ],
                             ),
@@ -6126,7 +6134,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'Stream quality',
                             subtitle:
-                                'Choose how aggressively FoxyMusic asks YouTube for audio streams.',
+                                'Ultra hunts lossless-capable sources , then falls back to the highest real stream.',
                             child: Wrap(
                               spacing: 8,
                               runSpacing: 8,
@@ -6149,7 +6157,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'Download quality',
                             subtitle:
-                                'Offline songs use this preference separately from streaming.',
+                                'Ultra stores the best audio format.',
                             child: Wrap(
                               spacing: 8,
                               runSpacing: 8,
@@ -6173,7 +6181,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'Stream source',
                             subtitle:
-                                'Choose source priority for Ultra. SoundCloud matches are checked before playback.',
+                                'Ultra can compare alternate matches when the primary source has no lossless stream.',
                             child: Wrap(
                               spacing: 8,
                               runSpacing: 8,
@@ -6200,7 +6208,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'Player look',
                             subtitle:
-                                'MetroList-style player customization with a white and black finish.',
+                                'Player customisations (currently in development).',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -6214,8 +6222,8 @@ class _SettingsSheetState extends State<_SettingsSheet>
                                   runSpacing: 8,
                                   children: [
                                     for (final item in const [
-                                      (0, 'Blurred art'),
-                                      (1, 'Dark glow'),
+                                      (0, 'Blurred img'),
+                                      (1, 'Dark & glow'),
                                       (2, 'Pure black'),
                                     ])
                                       ChoiceChip(
@@ -6281,7 +6289,7 @@ class _SettingsSheetState extends State<_SettingsSheet>
                           _SettingsCard(
                             title: 'Crossfade',
                             subtitle:
-                                'Fades out near the end of each track and in at the start of the next (SimpMusic-style). Also in ⋮ song menu.',
+                                '(Beta) Also in ⋮ song menu.',
                             child: Wrap(
                               spacing: 8,
                               runSpacing: 8,
@@ -7693,7 +7701,7 @@ class _HomeSongCardsSection extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           for (final song in songs)
             _HomeSongCard(
               song: song,
@@ -7721,13 +7729,13 @@ class _HomeSongCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 4),
       child: _FoxyGlassButton(
         onTap: onTap,
         selected: active,
         borderRadius: BorderRadius.circular(_kCardRadius),
         blurSigma: 12,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
             _Artwork(
@@ -8599,7 +8607,7 @@ class _MiniPlayerState extends State<_MiniPlayer>
           ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
-            child: _MetrolistMiniPlayRing(
+            child: _FoxyMiniPlayRing(
               progress: _progressCtrl,
               playing: playing,
               buffering: buffering,
@@ -8642,9 +8650,9 @@ class _MiniPlayerState extends State<_MiniPlayer>
   }
 }
 
-/// Metrolist / SimpMusic-style circular progress around the mini-player play control.
-class _MetrolistMiniPlayRing extends StatelessWidget {
-  const _MetrolistMiniPlayRing({
+/// Foxy / SimpMusic-style circular progress around the mini-player play control.
+class _FoxyMiniPlayRing extends StatelessWidget {
+  const _FoxyMiniPlayRing({
     required this.progress,
     required this.playing,
     required this.buffering,
@@ -8664,7 +8672,7 @@ class _MetrolistMiniPlayRing extends StatelessWidget {
       animation: progress,
       builder: (context, child) {
         return CustomPaint(
-          painter: _MetrolistMiniRingPainter(
+          painter: _FoxyMiniRingPainter(
             progress: progress.value.clamp(0.0, 1.0),
             accent: accent,
           ),
@@ -8713,8 +8721,8 @@ class _MetrolistMiniPlayRing extends StatelessWidget {
   }
 }
 
-class _MetrolistMiniRingPainter extends CustomPainter {
-  _MetrolistMiniRingPainter({required this.progress, required this.accent});
+class _FoxyMiniRingPainter extends CustomPainter {
+  _FoxyMiniRingPainter({required this.progress, required this.accent});
 
   final double progress;
   final Color accent;
@@ -8746,12 +8754,12 @@ class _MetrolistMiniRingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MetrolistMiniRingPainter oldDelegate) =>
+  bool shouldRepaint(covariant _FoxyMiniRingPainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.accent != accent;
 }
 
-class _MetrolistPlayerRoundIconButton extends StatelessWidget {
-  const _MetrolistPlayerRoundIconButton({
+class _FoxyPlayerRoundIconButton extends StatelessWidget {
+  const _FoxyPlayerRoundIconButton({
     required this.icon,
     required this.onPressed,
     this.tooltip,
@@ -8768,7 +8776,7 @@ class _MetrolistPlayerRoundIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final child = Material(
-      color: _kMetrolistNpSurface,
+      color: _kFoxyNpSurface,
       shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -8790,8 +8798,8 @@ class _MetrolistPlayerRoundIconButton extends StatelessWidget {
   }
 }
 
-class _MetrolistPlayerSectionLabel extends StatelessWidget {
-  const _MetrolistPlayerSectionLabel(this.text, {this.trailing});
+class _FoxyPlayerSectionLabel extends StatelessWidget {
+  const _FoxyPlayerSectionLabel(this.text, {this.trailing});
 
   final String text;
   final Widget? trailing;
@@ -9337,7 +9345,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                       2,
                                       0,
                                       2,
-                                      padBottom + 6,
+                                      padBottom + 4.8,
                                     ),
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
@@ -9359,15 +9367,15 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                     style: const TextStyle(
-                                                      fontSize: 24,
+                                                      fontSize: 25,
                                                       fontWeight:
                                                           FontWeight.w800,
-                                                      height: 1.08,
-                                                      letterSpacing: -0.3,
+                                                      height: 1.0,
+                                                      letterSpacing: -0.4,
                                                       color: Colors.white,
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 2),
+                                                  const SizedBox(height: 1.8),
                                                   Text(
                                                     song.artist,
                                                     maxLines: 1,
@@ -9392,7 +9400,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                       overflow:
                                                           TextOverflow.ellipsis,
                                                       style: TextStyle(
-                                                        fontSize: 11,
+                                                        fontSize: 10,
                                                         fontWeight:
                                                             FontWeight.w700,
                                                         color: Colors.white
@@ -9407,7 +9415,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                             ),
                                             Padding(
                                               padding: const EdgeInsets.only(
-                                                top: 4,
+                                                top: 5,
                                               ),
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
@@ -9546,7 +9554,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                           crossAxisAlignment:
                                               CrossAxisAlignment.stretch,
                                           children: [
-                                            _MetrolistSeekBar(
+                                            _FoxySeekBar(
                                               progress: progress,
                                               enabled: effectiveDurMs > 750,
                                               onSeek: (value) => _method
@@ -9562,7 +9570,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                 Text(
                                                   _fmt(position.round()),
                                                   style: const TextStyle(
-                                                    color: _kMetrolistNpTime,
+                                                    color: _kFoxyNpTime,
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w600,
                                                     fontFeatures: [
@@ -9575,7 +9583,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                                   endTimeLabel,
                                                   textAlign: TextAlign.right,
                                                   style: const TextStyle(
-                                                    color: _kMetrolistNpTime,
+                                                    color: _kFoxyNpTime,
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w600,
                                                     fontFeatures: [
@@ -9587,7 +9595,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                             ),
                                           ],
                                         ),
-                                        const SizedBox(height: 2),
+                                        const SizedBox(height: 3),
                                         _SimpMusicPlayerControlLayout(
                                           shuffle: shuffle,
                                           repeatMode: repeat,
@@ -9598,51 +9606,39 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                           buttonStyle: playerButtonsStyle,
                                         ),
                                         Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 6,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              _PlayerBottomToolButton(
-                                                tooltip: 'Track info',
-                                                icon:
-                                                    Icons.info_outline_rounded,
-                                                onPressed: () =>
-                                                    _showTrackInfo(song),
-                                              ),
-                                              const Spacer(),
-                                              _PlayerBottomToolButton(
-                                                tooltip: 'Lyrics',
-                                                icon: Icons.lyrics_outlined,
-                                                whiteGlow: true,
-                                                onPressed: () =>
-                                                    setState(() => _tab = 1),
-                                              ),
-                                              const SizedBox(width: 22),
-                                              _PlayerBottomToolButton(
-                                                tooltip: 'Queue',
-                                                icon: Icons.queue_music_rounded,
-                                                onPressed: () =>
-                                                    setState(() => _tab = 2),
-                                              ),
-                                              const SizedBox(width: 22),
-                                              _PlayerBottomToolButton(
-                                                tooltip: 'Sleep timer',
-                                                icon: Icons.bedtime_outlined,
-                                                onPressed: () =>
-                                                    _showSleepTimerSheet(
-                                                      context,
-                                                    ),
-                                              ),
-                                              const SizedBox(width: 22),
-                                              _PlayerBottomToolButton(
-                                                tooltip: 'Equalizer',
-                                                icon: Icons.graphic_eq_rounded,
-                                                onPressed: _openSystemEqualizer,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+  padding: const EdgeInsets.only(top: 9, bottom: 13),
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.spaceEvenly,   // ← Best fix
+    children: [
+      _PlayerBottomToolButton(
+        tooltip: 'Track info',
+        icon: Icons.info_outline_rounded,
+        onPressed: () => _showTrackInfo(song),
+      ),
+      _PlayerBottomToolButton(
+        tooltip: 'Lyrics',
+        icon: Icons.lyrics_outlined,
+        whiteGlow: true,
+        onPressed: () => setState(() => _tab = 1),
+      ),
+      _PlayerBottomToolButton(
+        tooltip: 'Queue',
+        icon: Icons.queue_music_rounded,
+        onPressed: () => setState(() => _tab = 2),
+      ),
+      _PlayerBottomToolButton(
+        tooltip: 'Sleep timer',
+        icon: Icons.bedtime_outlined,
+        onPressed: () => _showSleepTimerSheet(context),
+      ),
+      _PlayerBottomToolButton(
+        tooltip: 'Equalizer',
+        icon: Icons.graphic_eq_rounded,
+        onPressed: _openSystemEqualizer,
+      ),
+    ],
+  ),
+),
                                       ],
                                     ),
                                   ),
@@ -9676,8 +9672,8 @@ class _NowPlayingBrandHeader extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const _FoxyAppLogo(size: 36, borderRadius: 10, showGlow: false),
-          const SizedBox(width: 10),
+          const _FoxyAppLogo(size: 32, borderRadius: 10, showGlow: false),
+          const SizedBox(width: 11),
           Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -9685,9 +9681,9 @@ class _NowPlayingBrandHeader extends StatelessWidget {
               RichText(
                 text: TextSpan(
                   style: const TextStyle(
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: FontWeight.w900,
-                    height: 1.0,
+                    height: 3.0,
                     color: Colors.white,
                   ),
                   children: const [
@@ -9696,11 +9692,11 @@ class _NowPlayingBrandHeader extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 3.0),
               Text(
                 subtitle,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: Colors.white.withValues(alpha: 0.58),
                 ),
@@ -9746,8 +9742,8 @@ class _NpIconAction extends StatelessWidget {
         child: InkWell(
           onTap: onPressed,
           child: Container(
-            width: 44,
-            height: 44,
+            width: 41,
+            height: 41,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
@@ -9756,7 +9752,7 @@ class _NpIconAction extends StatelessWidget {
             ),
             child: Icon(
               icon,
-              size: 22,
+              size: 21,
               color: style == 2
                   ? Colors.black
                   : (iconColor ?? Colors.white.withValues(alpha: 0.92)),
@@ -9834,8 +9830,8 @@ class _PlayerBottomToolButton extends StatelessWidget {
   }
 }
 
-class _MetrolistSeekBar extends StatelessWidget {
-  const _MetrolistSeekBar({
+class _FoxySeekBar extends StatelessWidget {
+  const _FoxySeekBar({
     required this.progress,
     required this.enabled,
     required this.onSeek,
@@ -9862,9 +9858,9 @@ class _MetrolistSeekBar extends StatelessWidget {
           ? (d) => _seek(context, d.localPosition.dx)
           : null,
       child: SizedBox(
-        height: 28,
+        height: 29,
         child: CustomPaint(
-          painter: _MetrolistSeekBarPainter(
+          painter: _FoxySeekBarPainter(
             progress: progress.clamp(0.0, 1.0),
             enabled: enabled,
           ),
@@ -9874,8 +9870,8 @@ class _MetrolistSeekBar extends StatelessWidget {
   }
 }
 
-class _MetrolistSeekBarPainter extends CustomPainter {
-  const _MetrolistSeekBarPainter({
+class _FoxySeekBarPainter extends CustomPainter {
+  const _FoxySeekBarPainter({
     required this.progress,
     required this.enabled,
   });
@@ -9919,7 +9915,7 @@ class _MetrolistSeekBarPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MetrolistSeekBarPainter oldDelegate) =>
+  bool shouldRepaint(covariant _FoxySeekBarPainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.enabled != enabled;
 }
 
@@ -10133,7 +10129,7 @@ class _LyricsTab extends StatelessWidget {
         padding: const EdgeInsets.only(top: 48),
         child: _EmptyTabBody(
           icon: Icons.subtitles_off_rounded,
-          title: 'No synced lyrics',
+          title: 'No lyrics found...',
           subtitle: preferLrclib
               ? 'LRCLIB had no match — try turning off “Prefer LRCLIB” in Settings or ⋮ menu.'
               : 'YouTube captions had no match — try “Prefer LRCLIB” in Settings.',
@@ -10275,14 +10271,14 @@ class _AnimatedLyricsListState extends State<_AnimatedLyricsList> {
                               : passed
                               ? Colors.white.withValues(alpha: 0.34)
                               : Colors.white.withValues(alpha: 0.58),
-                          fontSize: isActive ? 24 : 19,
-                          height: 1.32,
+                          fontSize: isActive ? 23 : 17,
+                          height: 1.36,
                           fontWeight: isActive
                               ? FontWeight.w900
                               : FontWeight.w700,
                           shadows: isActive
                               ? const [
-                                  Shadow(color: Colors.white70, blurRadius: 10),
+                                  Shadow(color: Colors.white70, blurRadius: 11),
                                 ]
                               : null,
                         ),
@@ -10319,7 +10315,7 @@ class _QueueTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 14),
-        _MetrolistPlayerSectionLabel(
+        _FoxyPlayerSectionLabel(
           'Queue',
           trailing: Padding(
             padding: const EdgeInsets.only(bottom: 1, right: 2),
@@ -10650,6 +10646,7 @@ class _PlayerArtwork extends StatelessWidget {
 }
 
 /// Small vinyl disc badge — spins in the upper-right corner of the artwork.
+/// Small vinyl disc badge — spins automatically when song is playing
 class _SpinningDiscOverlay extends StatefulWidget {
   const _SpinningDiscOverlay({
     required this.size,
@@ -10676,41 +10673,43 @@ class _SpinningDiscOverlay extends StatefulWidget {
 class _SpinningDiscOverlayState extends State<_SpinningDiscOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _spinCtrl;
-  bool _spinning = false;
 
   @override
   void initState() {
     super.initState();
     _spinCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 5),
+      duration: const Duration(seconds: 4), // Smooth speed
     );
-    _syncSpin();
+    _syncSpinState();
   }
 
   @override
   void didUpdateWidget(covariant _SpinningDiscOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.playing != widget.playing) {
-      if (!widget.playing) {
-        _spinning = false;
-      }
-      _syncSpin();
+      _syncSpinState();
     }
   }
 
-  void _toggleSpin() {
-    setState(() {
-      _spinning = !_spinning;
-      _syncSpin();
-    });
-  }
-
-  void _syncSpin() {
-    if (_spinning) {
-      if (!_spinCtrl.isAnimating) _spinCtrl.repeat();
+  void _syncSpinState() {
+    if (widget.playing) {
+      if (!_spinCtrl.isAnimating) {
+        _spinCtrl.repeat();
+      }
     } else {
       _spinCtrl.stop();
+    }
+  }
+
+  // Optional: Still allow tap to pause/resume spin
+  void _toggleSpin() {
+    if (widget.playing) {
+      if (_spinCtrl.isAnimating) {
+        _spinCtrl.stop();
+      } else {
+        _spinCtrl.repeat();
+      }
     }
   }
 
@@ -11391,13 +11390,18 @@ String _fmt(int ms) {
 }
 
 String _streamQualityLabel(Map<String, dynamic> player) {
+  final qualityLabel = player['streamQualityLabel']?.toString() ?? '';
   final codec = player['streamCodec']?.toString() ?? '';
   final source = player['streamSource']?.toString() ?? '';
   final bitrate = ((player['streamBitrate'] ?? 0) as num).toInt();
   final sampleRate = ((player['streamSampleRate'] ?? 0) as num).toInt();
   final itag = ((player['streamItag'] ?? 0) as num).toInt();
   final parts = <String>[];
-  if (codec.isNotEmpty) parts.add(codec);
+  if (qualityLabel.isNotEmpty) {
+    parts.add(qualityLabel);
+  } else if (codec.isNotEmpty) {
+    parts.add(codec);
+  }
   if (bitrate > 0) parts.add('${(bitrate / 1000).round()} kbps');
   if (sampleRate > 0) {
     parts.add('${(sampleRate / 1000).toStringAsFixed(1)} kHz');

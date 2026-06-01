@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 const _kSplashDuration = Duration(milliseconds: 1100);
 
-/// Cold-start splash: simple Metrolist-style black screen with restrained branding.
+/// Cold-start splash: simple Foxy-style black screen with restrained branding.
 class FoxyStartupSplash extends StatefulWidget {
   const FoxyStartupSplash({super.key, required this.onFinished});
 
