@@ -2,7 +2,7 @@
 
 **FoxyMusic** is an Android music client with a **Kotlin** playback engine and a **Flutter** UI. Stream and organize your library with a YouTube Music–oriented experience: home feed, search, library, full-screen now playing, synced lyrics, queue, downloads, and settings.
 
-**Current release:** `1.1` (versionCode 4) · [Releases](https://github.com/sparkn2008-del/FoxyMusic/releases)
+**Current release:** `1.2.2` (versionCode 6) · [Releases](https://github.com/sparkn2008-del/FoxyMusic/releases)
 
 Made with ❤️ by **Foxy Nish** ([@sparkn2008-del](https://github.com/sparkn2008-del))
 
@@ -14,7 +14,7 @@ Made with ❤️ by **Foxy Nish** ([@sparkn2008-del](https://github.com/sparkn20
 |------|------------|
 | **Playback** | Media3 / ExoPlayer queue, shuffle & repeat, crossfade, volume normalize, SponsorBlock |
 | **UI** | Flutter shell — home, search, library, mini & full player, account hub |
-| **Now playing** | Large artwork, Metrolist-style seek bar, LRCLIB / YouTube lyrics, sleep timer, queue |
+| **Now playing** | Large artwork, Foxy-style seek bar, LRCLIB / YouTube lyrics, sleep timer, queue |
 | **Library** | Liked songs, playlists, downloads, play history |
 | **Look & feel** | AMOLED-friendly dark theme, dynamic accents from artwork, frosted-glass chrome |
 | **Updates** | GitHub release check (daily auto-check + notifications), in-app “Check for updates” |
@@ -82,7 +82,7 @@ Channel names, methods, and event payloads are listed in **`FOXYMUSIC_INSTRUCTIO
 
 See **[changelog.txt](changelog.txt)** for version history.
 
-Recent **1.1** highlights: GitHub updater, update notifications, dynamic version label in settings.
+Recent **1.2.2** highlights: GitHub updater, update notifications, dynamic version label in settings.
 
 ---
 
