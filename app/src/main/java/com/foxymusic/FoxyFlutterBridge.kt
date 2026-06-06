@@ -98,6 +98,7 @@ class FoxyFlutterBridge(
             "shuffleEnabled" to ui.shuffleEnabled,
             "repeatMode" to ui.repeatMode.name,
             "error" to ui.error,
+            "volume" to ui.volume,
             "currentSong" to currentSongMap,
             "songIsLiked" to liked,
             "dynamicSongColors" to settings.dynamicSongColors,
@@ -108,16 +109,25 @@ class FoxyFlutterBridge(
             "canPlayPrevious" to MusicPlayer.canPlayPrevious(),
             "canPlayNext" to MusicPlayer.mediaNotificationHasNext(),
             "crossfadeMs" to settings.crossfadeMs,
+            "playerProgressStyle" to settings.playerProgressStyle,
+            "playerSeekMotion" to settings.playerSeekMotion,
+            "playerBackgroundStyle" to settings.playerBackgroundStyle,
+            "playerStyle" to settings.playerStyle,
+            "playerButtonsStyle" to settings.playerButtonsStyle,
+            "playerArtworkShape" to settings.playerArtworkShape,
+            "lyricsAnimationStyle" to settings.lyricsAnimationStyle,
             "lyricsPreferLrclib" to settings.lyricsPreferLrclib,
             "lyricsRomanize" to settings.lyricsRomanize,
             "normalizeVolume" to settings.normalizeVolume,
             "streamQualityTier" to settings.streamQualityTier,
+            "streamSourcePriority" to settings.streamSourcePriority,
             "streamBitrate" to ui.streamBitrate,
             "streamCodec" to ui.streamCodec,
             "streamMimeType" to ui.streamMimeType,
             "streamSampleRate" to ui.streamSampleRate,
             "streamItag" to ui.streamItag,
             "streamSource" to ui.streamSource,
+            "streamQualityLabel" to ui.streamQualityLabel,
         )
         if (includeQueue) {
             payload["queue"] = ui.queue.map { q -> q.toFlutterMap(context) }
@@ -167,6 +177,89 @@ class FoxyFlutterBridge(
                     flutterPlayerStateMap(FoxyPlayerConnection.state.value, includeQueue = true),
                 )
             }
+            FoxyFlutterChannels.Methods.GET_RECOGNITION_STATE -> {
+                result.success(FoxyRecognition.state.value.toMap())
+            }
+            FoxyFlutterChannels.Methods.GET_RECOGNITION_HISTORY -> {
+                result.success(FoxyRecognitionHistory.all().map { it.toMap() })
+            }
+            FoxyFlutterChannels.Methods.CLEAR_RECOGNITION_HISTORY -> {
+                FoxyRecognitionHistory.clear()
+                result.success(mapOf("ok" to true))
+            }
+            FoxyFlutterChannels.Methods.RESOLVE_RECOGNIZED_TRACK -> {
+                val title = call.argument<String>("title").orEmpty().trim()
+                val artist = call.argument<String>("artist").orEmpty().trim()
+                val youtubeVideoId = call.argument<String>("youtubeVideoId").orEmpty().trim()
+                scope.launch {
+                    val payload = runCatching {
+                        withContext(Dispatchers.IO) {
+                            val query = listOf(title, artist)
+                                .filter { it.isNotBlank() }
+                                .joinToString(" ")
+                            val results = YTMusicApi.search(query).take(20)
+                            val exact = results.firstOrNull { it.videoId == youtubeVideoId }
+                            val ranked = results
+                                .map {
+                                    it to recognitionMatchScore(
+                                        it,
+                                        title = title,
+                                        artist = artist,
+                                        youtubeVideoId = youtubeVideoId,
+                                    )
+                                }
+                                .sortedByDescending { it.second }
+                            val best = ranked.firstOrNull()
+                            val chosen = exact ?: best?.first
+                            chosen?.let { song ->
+                                val matchLabel = when {
+                                    exact != null && song.videoId == exact.videoId ->
+                                        "Exact match"
+                                    (best?.second ?: 0) >= 620 ->
+                                        "Strong match"
+                                    else ->
+                                        "Best match"
+                                }
+                                mapOf(
+                                    "song" to song.toFlutterMap(),
+                                    "matchLabel" to matchLabel,
+                                )
+                            }
+                        }
+                    }
+                    payload.onSuccess(result::success)
+                        .onFailure {
+                            result.error(
+                                "recognition_resolve_failed",
+                                it.message ?: "Could not resolve recognized track",
+                                null,
+                            )
+                        }
+                }
+            }
+            FoxyFlutterChannels.Methods.START_RECOGNITION -> {
+                val act = context as? MainActivity
+                if (act == null) {
+                    if (!FoxyRecognition.hasRecordPermission(context)) {
+                        result.error(
+                            "permission_denied",
+                            "Microphone permission is required for music recognition",
+                            null,
+                        )
+                    } else {
+                        startRecognition()
+                        result.success(mapOf("ok" to true))
+                    }
+                } else {
+                    act.startRecognition(result)
+                }
+            }
+            FoxyFlutterChannels.Methods.STOP_RECOGNITION -> {
+                scope.launch {
+                    FoxyRecognition.stop()
+                    result.success(mapOf("ok" to true))
+                }
+            }
             FoxyFlutterChannels.Methods.GET_APPEARANCE -> {
                 val settings = FoxySettings.state.value
                 val palette = settings.palette(FoxyDynamicTheme.accent.value)
@@ -183,10 +276,19 @@ class FoxyFlutterBridge(
                         "saveHistory" to settings.saveHistory,
                         "sponsorBlockEnabled" to settings.sponsorBlockEnabled,
                         "crossfadeMs" to settings.crossfadeMs,
+                        "playerProgressStyle" to settings.playerProgressStyle,
+                        "playerSeekMotion" to settings.playerSeekMotion,
+                        "playerBackgroundStyle" to settings.playerBackgroundStyle,
+                        "playerStyle" to settings.playerStyle,
+                        "playerButtonsStyle" to settings.playerButtonsStyle,
+                        "playerArtworkShape" to settings.playerArtworkShape,
+                        "lyricsAnimationStyle" to settings.lyricsAnimationStyle,
                         "lyricsPreferLrclib" to settings.lyricsPreferLrclib,
                         "lyricsRomanize" to settings.lyricsRomanize,
                         "streamQualityTier" to settings.streamQualityTier,
                         "downloadQualityTier" to settings.downloadQualityTier,
+                        "streamSourcePriority" to settings.streamSourcePriority,
+                        "homeBackgroundEnabled" to settings.homeBackgroundEnabled,
                         "contentLanguageTag" to settings.contentLanguageTag,
                         "appLanguageTag" to settings.appLanguageTag,
                         "proxyEnabled" to settings.proxyEnabled,
@@ -244,10 +346,19 @@ class FoxyFlutterBridge(
                 val saveHistory = call.argument<Boolean>("saveHistory")
                 val sponsorBlockEnabled = call.argument<Boolean>("sponsorBlockEnabled")
                 val crossfadeMs = call.argument<Number>("crossfadeMs")?.toInt()
+                val playerProgressStyle = call.argument<Number>("playerProgressStyle")?.toInt()
+                val playerSeekMotion = call.argument<Number>("playerSeekMotion")?.toInt()
+                val playerBackgroundStyle = call.argument<Number>("playerBackgroundStyle")?.toInt()
+                val playerStyle = call.argument<Number>("playerStyle")?.toInt()
+                val playerButtonsStyle = call.argument<Number>("playerButtonsStyle")?.toInt()
+                val playerArtworkShape = call.argument<Number>("playerArtworkShape")?.toInt()
+                val lyricsAnimationStyle = call.argument<Number>("lyricsAnimationStyle")?.toInt()
                 val lyricsPreferLrclib = call.argument<Boolean>("lyricsPreferLrclib")
                 val lyricsRomanize = call.argument<Boolean>("lyricsRomanize")
                 val streamQualityTier = call.argument<Number>("streamQualityTier")?.toInt()
                 val downloadQualityTier = call.argument<Number>("downloadQualityTier")?.toInt()
+                val streamSourcePriority = call.argument<Number>("streamSourcePriority")?.toInt()
+                val homeBackgroundEnabled = call.argument<Boolean>("homeBackgroundEnabled")
                 val contentLanguageTag = call.argument<String>("contentLanguageTag")
                 val appLanguageTag = call.argument<String>("appLanguageTag")
                 val proxyEnabled = call.argument<Boolean>("proxyEnabled")
@@ -277,11 +388,29 @@ class FoxyFlutterBridge(
                                 else -> current.crossfadeMs
                             }
                         } ?: current.crossfadeMs,
+                        playerProgressStyle = playerProgressStyle?.coerceIn(0, 3)
+                            ?: current.playerProgressStyle,
+                        playerSeekMotion = playerSeekMotion?.coerceIn(0, 2)
+                            ?: current.playerSeekMotion,
+                        playerBackgroundStyle = playerBackgroundStyle?.coerceIn(0, 3)
+                            ?: current.playerBackgroundStyle,
+                        playerStyle = playerStyle?.coerceIn(0, 2)
+                            ?: current.playerStyle,
+                        playerButtonsStyle = playerButtonsStyle?.coerceIn(0, 2)
+                            ?: current.playerButtonsStyle,
+                        playerArtworkShape = playerArtworkShape?.coerceIn(0, 2)
+                            ?: current.playerArtworkShape,
+                        lyricsAnimationStyle = lyricsAnimationStyle?.coerceIn(0, 5)
+                            ?: current.lyricsAnimationStyle,
                         lyricsPreferLrclib = lyricsPreferLrclib ?: current.lyricsPreferLrclib,
                         lyricsRomanize = lyricsRomanize ?: current.lyricsRomanize,
-                        streamQualityTier = streamQualityTier?.coerceIn(0, 3) ?: current.streamQualityTier,
-                        downloadQualityTier = downloadQualityTier?.coerceIn(0, 3)
+                        streamQualityTier = streamQualityTier?.coerceIn(0, 4) ?: current.streamQualityTier,
+                        downloadQualityTier = downloadQualityTier?.coerceIn(0, 4)
                             ?: current.downloadQualityTier,
+                        streamSourcePriority = streamSourcePriority?.coerceIn(0, 2)
+                            ?: current.streamSourcePriority,
+                        homeBackgroundEnabled = homeBackgroundEnabled
+                            ?: current.homeBackgroundEnabled,
                         contentLanguageTag = contentLanguageTag?.trim()?.takeIf { it.isNotEmpty() }
                             ?: current.contentLanguageTag,
                         appLanguageTag = appLanguageTag?.let { it.trim() } ?: current.appLanguageTag,
@@ -307,6 +436,7 @@ class FoxyFlutterBridge(
             FoxyFlutterChannels.Methods.ACCOUNT_INFO -> {
                 val account = FoxyAccount.state.value
                 val library = FoxyLibraryStore.state.value
+                val localPlaylistCount = FoxyUserPlaylists.all().size
                 result.success(
                     mapOf(
                         "isSignedIn" to account.isSignedIn,
@@ -315,7 +445,7 @@ class FoxyFlutterBridge(
                         "email" to account.email,
                         "avatarUrl" to account.avatarUrl,
                         "likedCount" to library.likedSongs.size,
-                        "playlistCount" to library.savedSongs.size,
+                        "playlistCount" to localPlaylistCount,
                         "historyCount" to library.historySongs.size,
                         "downloadCount" to library.downloadedSongs.size
                     )
@@ -367,6 +497,9 @@ class FoxyFlutterBridge(
                             "source" to "local",
                         )
                     }
+                    val playlistSongs = FoxyUserPlaylists.all()
+                        .flatMap { it.songs }
+                        .distinctBy { it.videoId }
                     val ytPlaylistMaps = ytSummaries.map { s ->
                         mapOf(
                             "id" to s.id,
@@ -384,16 +517,26 @@ class FoxyFlutterBridge(
                     result.success(
                         mapOf(
                             "downloads" to library.downloadedSongs.map { it.toFlutterMap() },
+                            "local" to library.localSongs.map { it.toFlutterMap() },
                             "liked" to library.likedSongs.map { it.toFlutterMap() },
                             "history" to library.historySongs.map { it.toFlutterMap() },
                             "saved" to library.savedSongs.map { it.toFlutterMap() },
-                            "playlists" to library.savedSongs.map { it.toFlutterMap() },
+                            "playlists" to playlistSongs.map { it.toFlutterMap() },
                             "mostPlayed" to library.mostPlayedFromHistory().map { it.toFlutterMap() },
                             "recentlyAdded" to library.recentlyMerged().map { it.toFlutterMap() },
                             "explore" to explore.map { it.toFlutterMap() },
+                            "playlistCount" to (localPlaylistMaps.size + ytPlaylistMaps.size),
                             "userPlaylists" to localPlaylistMaps + ytPlaylistMaps,
                         ),
                     )
+                }
+            }
+            FoxyFlutterChannels.Methods.IMPORT_LOCAL_AUDIO -> {
+                val act = context as? MainActivity
+                if (act == null) {
+                    result.error("no_activity", "Cannot open audio picker", null)
+                } else {
+                    act.importLocalAudio(result)
                 }
             }
             FoxyFlutterChannels.Methods.SEARCH -> {
@@ -682,6 +825,12 @@ class FoxyFlutterBridge(
                 result.success(null)
                 scheduleFlutterPlayerStatePush()
             }
+            FoxyFlutterChannels.Methods.SET_VOLUME -> {
+                val volume = call.argument<Number>("volume")?.toFloat() ?: 1f
+                FoxyPlayerConnection.setVolume(volume)
+                result.success(null)
+                scheduleFlutterPlayerStatePush()
+            }
             FoxyFlutterChannels.Methods.TOGGLE_SHUFFLE -> {
                 FoxyPlayerConnection.toggleShuffle()
                 result.success(null)
@@ -699,6 +848,7 @@ class FoxyFlutterBridge(
                 } else {
                     FoxyLibraryStore.toggleLiked(song)
                     result.success(null)
+                    emitLibraryFeedChanged()
                     emitLivePlayerStateEvent()
                     scheduleFlutterPlayerStatePush()
                 }
@@ -710,6 +860,7 @@ class FoxyFlutterBridge(
                 } else {
                     FoxyLibraryStore.toggleLiked(song)
                     result.success(null)
+                    emitLibraryFeedChanged()
                     emitLivePlayerStateEvent()
                     scheduleFlutterPlayerStatePush()
                 }
@@ -1039,6 +1190,32 @@ class FoxyFlutterBridge(
                     }
                 }
             }
+            FoxyFlutterChannels.Methods.GET_VIDEO_CLIP_STREAM -> {
+                val videoId = call.argument<String>("videoId").orEmpty().trim()
+                val title = call.argument<String>("title").orEmpty().trim()
+                val artist = call.argument<String>("artist").orEmpty().trim()
+                if (videoId.isBlank()) {
+                    result.error("bad_args", "Missing videoId", null)
+                } else {
+                    val clip = StreamExtractor.getVideoClipResult(
+                        videoId = videoId,
+                        title = title,
+                        artist = artist,
+                    )
+                    result.success(
+                        mapOf(
+                            "url" to clip.url,
+                            "source" to clip.source,
+                            "bitrate" to clip.bitrate,
+                            "codec" to clip.codec,
+                            "mimeType" to clip.mimeType,
+                            "itag" to clip.itag,
+                            "qualityLabel" to clip.qualityLabel,
+                            "error" to clip.error,
+                        ),
+                    )
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -1084,7 +1261,7 @@ class FoxyFlutterBridge(
                         return@collect
                     }
                     val now = System.currentTimeMillis()
-                    if (now - lastLightEmitAtMs < 450L) return@collect
+                    if (now - lastLightEmitAtMs < 180L) return@collect
                     lastLightEmitAtMs = now
                     emitLivePlayerStateEvent(ui, includeQueue = false)
                 }
@@ -1125,6 +1302,33 @@ class FoxyFlutterBridge(
                 }
             }
             launch {
+                var lastFeedSignature = ""
+                FoxyLibraryStore.notifyEpoch
+                    .debounce(120)
+                    .collect { _ ->
+                        val state = FoxyLibraryStore.state.value
+                        val nextSignature = buildString {
+                            append(state.likedSongs.joinToString("|") { it.videoId })
+                            append("::")
+                            append(state.historySongs.joinToString("|") { it.videoId })
+                            append("::")
+                            append(
+                                state.playCounts.entries
+                                    .sortedBy { it.key }
+                                    .joinToString("|") { "${it.key}:${it.value}" },
+                            )
+                            append("::")
+                            append(state.localSongs.joinToString("|") { it.videoId })
+                            append("::")
+                            append(state.downloadedSongs.joinToString("|") { it.videoId })
+                        }
+                        if (nextSignature != lastFeedSignature) {
+                            lastFeedSignature = nextSignature
+                            emitLibraryFeedChanged()
+                        }
+                    }
+            }
+            launch {
                 FoxyPlayerConnection.sleepTimerState.collect { timer ->
                     emit(
                         mapOf(
@@ -1134,6 +1338,16 @@ class FoxyFlutterBridge(
                                 "fireAtEpochMs" to timer.fireAtEpochMs
                             )
                         )
+                    )
+                }
+            }
+            launch {
+                FoxyRecognition.state.collect { status ->
+                    emit(
+                        mapOf(
+                            "type" to FoxyFlutterChannels.Events.RECOGNITION_STATE,
+                            "state" to status.toMap(),
+                        ),
                     )
                 }
             }
@@ -1161,6 +1375,10 @@ class FoxyFlutterBridge(
 
     private fun emitLibraryFeedChanged() {
         emit(mapOf("type" to FoxyFlutterChannels.Events.LIBRARY_FEED_CHANGED))
+    }
+
+    fun startRecognition() {
+        FoxyRecognition.start(context.applicationContext)
     }
 
     fun emitAppearanceChanged() {
@@ -1316,9 +1534,21 @@ private suspend fun fetchLyricsForUi(context: Context, song: Song): List<Map<Str
 }
 
 private fun FoxyLibraryState.mostPlayedFromHistory(): List<Song> =
-    historySongs.groupingBy { it.videoId }.eachCount()
-        .entries.sortedByDescending { it.value }
-        .mapNotNull { (vid, _) -> historySongs.findLast { it.videoId == vid } }
+    playCounts.entries
+        .sortedWith(
+            compareByDescending<Map.Entry<String, Int>> { it.value }
+                .thenByDescending { entry ->
+                    historySongs.indexOfFirst { it.videoId == entry.key }
+                        .let { if (it < 0) -1 else historySongs.size - it }
+                },
+        )
+        .mapNotNull { (vid, _) ->
+            historySongs.findLast { it.videoId == vid }
+                ?: likedSongs.findLast { it.videoId == vid }
+                ?: downloadedSongs.findLast { it.videoId == vid }
+                ?: localSongs.findLast { it.videoId == vid }
+                ?: allSongs.findLast { it.videoId == vid }
+        }
 
 private fun FoxyLibraryState.recentlyMerged(): List<Song> {
     val out = ArrayList<Song>()
@@ -1329,8 +1559,36 @@ private fun FoxyLibraryState.recentlyMerged(): List<Song> {
     for (s in downloadedSongs.asReversed()) {
         if (seen.add(s.videoId)) out.add(s)
     }
+    for (s in localSongs.asReversed()) {
+        if (seen.add(s.videoId)) out.add(s)
+    }
     for (s in historySongs) {
         if (seen.add(s.videoId)) out.add(s)
     }
     return out
+}
+
+private fun recognitionMatchScore(
+    song: Song,
+    title: String,
+    artist: String,
+    youtubeVideoId: String,
+): Int {
+    var score = 0
+    if (youtubeVideoId.isNotBlank() && song.videoId == youtubeVideoId) score += 1000
+    val songTitle = song.title.trim().lowercase(Locale.US)
+    val targetTitle = title.trim().lowercase(Locale.US)
+    val songArtist = song.artist.trim().lowercase(Locale.US)
+    val targetArtist = artist.trim().lowercase(Locale.US)
+    if (targetTitle.isNotBlank() && songTitle == targetTitle) score += 400
+    else if (targetTitle.isNotBlank() && songTitle.contains(targetTitle)) score += 180
+    if (targetArtist.isNotBlank() && songArtist == targetArtist) score += 260
+    else if (targetArtist.isNotBlank() && songArtist.contains(targetArtist)) score += 120
+    val combined = "$songTitle $songArtist"
+    if (combined.contains("live")) score -= 40
+    if (combined.contains("cover")) score -= 55
+    if (combined.contains("karaoke")) score -= 80
+    if (combined.contains("slowed")) score -= 45
+    if (combined.contains("remix")) score -= 25
+    return score
 }

@@ -152,6 +152,8 @@ private fun FoxyCustomization.toBackupJson(): JSONObject = JSONObject().apply {
     put("lyricsRomanize", lyricsRomanize)
     put("streamQualityTier", streamQualityTier)
     put("downloadQualityTier", downloadQualityTier)
+    put("streamSourcePriority", streamSourcePriority)
+    put("homeBackgroundEnabled", homeBackgroundEnabled)
     put("contentLanguageTag", contentLanguageTag)
     put("appLanguageTag", appLanguageTag)
     put("proxyEnabled", proxyEnabled)
@@ -196,9 +198,15 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
             ),
             lyricsRomanize = json.optBoolean("lyricsRomanize", current.lyricsRomanize),
             streamQualityTier = json.optInt("streamQualityTier", current.streamQualityTier)
-                .coerceIn(0, 3),
+                .coerceIn(0, 4),
             downloadQualityTier = json.optInt("downloadQualityTier", current.downloadQualityTier)
-                .coerceIn(0, 3),
+                .coerceIn(0, 4),
+            streamSourcePriority = json.optInt("streamSourcePriority", current.streamSourcePriority)
+                .coerceIn(0, 2),
+            homeBackgroundEnabled = json.optBoolean(
+                "homeBackgroundEnabled",
+                current.homeBackgroundEnabled,
+            ),
             contentLanguageTag = json.optString(
                 "contentLanguageTag",
                 current.contentLanguageTag,

@@ -12,7 +12,7 @@ import java.util.Locale
 
 /**
 
- * Metrolist-style queue filtering: songs only, skip videos / podcasts / playlists,
+ * Foxy-style queue filtering: songs only, skip videos / podcasts / playlists,
 
  * and cap track length for autoplay / queue advance (10 minutes).
 
@@ -263,16 +263,6 @@ object YtmMusicFilter {
 
         }
 
-        if (blob.contains("official video") && !blob.contains("audio only")) return false
-
-        if (blob.contains("music video") || blob.contains(" (mv)") || blob.endsWith(" mv")) {
-
-            return false
-
-        }
-
-        if (blob.contains("(video)") || blob.contains("[video]")) return false
-
         if (blob.contains("full episode")) return false
 
         if (blob.contains("playlist") && !blob.contains("song")) return false
@@ -445,7 +435,7 @@ object YtmMusicFilter {
 
 fun Song.isMusicQueueTrack(): Boolean =
 
-    YtmMusicFilter.isMusicQueueTrack(title, artist, duration)
+    !localPath.isNullOrBlank() || YtmMusicFilter.isMusicQueueTrack(title, artist, duration)
 
 
 

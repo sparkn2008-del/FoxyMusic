@@ -4,7 +4,7 @@ import android.content.Context
 
 /**
  * Unified playback entry points so Home, Search, Library, and Queue all use the same
- * Metrolist-style radio feed ([YTMusicApi.fetchRadioPage]) when starting from a single track.
+ * Foxy-style radio feed ([YTMusicApi.fetchRadioPage]) when starting from a single track.
  */
 object FoxyPlayback {
 

@@ -49,7 +49,15 @@ object FoxyDownloadManager {
             try {
                 val tier = FoxySettings.state.value.downloadQualityTier
                 val result = withContext(Dispatchers.IO) {
-                    StreamExtractor.getStreamResult(song.videoId, tier)
+                    StreamExtractor.getStreamResult(
+                        song.videoId,
+                        tier,
+                        listOf(song.title, song.artist)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() && it != song.videoId }
+                            .distinct()
+                            .joinToString(" ")
+                    )
                 }
                 val url = result.url
                 if (url.isNullOrBlank()) {
@@ -152,6 +160,9 @@ object FoxyDownloadManager {
 
     private fun outputExtFromUrl(url: String): String {
         return when {
+            url.contains(".flac", ignoreCase = true) || url.contains("audio%2Fflac", ignoreCase = true) || url.contains("audio/flac", ignoreCase = true) -> ".flac"
+            url.contains(".alac", ignoreCase = true) -> ".m4a"
+            url.contains(".wav", ignoreCase = true) || url.contains("audio%2Fwav", ignoreCase = true) || url.contains("audio/wav", ignoreCase = true) -> ".wav"
             url.contains(".webm", ignoreCase = true) -> ".webm"
             url.contains(".mp4", ignoreCase = true) -> ".mp4"
             url.contains(".m4a", ignoreCase = true) -> ".m4a"

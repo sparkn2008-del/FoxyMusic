@@ -24,6 +24,7 @@ object FoxyFlutterChannels {
         const val PAUSE = "pause"
         const val TOGGLE_PLAY_PAUSE = "togglePlayPause"
         const val SEEK_TO = "seekTo"
+        const val SET_VOLUME = "setVolume"
         const val PLAY_QUEUE = "playQueue"
         const val NEXT = "next"
         const val PREVIOUS = "previous"
@@ -33,6 +34,7 @@ object FoxyFlutterChannels {
         const val UNLIKE = "unlike"
         const val DOWNLOAD = "download"
         const val REMOVE_DOWNLOAD = "removeDownload"
+        const val IMPORT_LOCAL_AUDIO = "importLocalAudio"
         const val SLEEP_TIMER = "sleepTimer"
         const val CANCEL_SLEEP_TIMER = "cancelSleepTimer"
         const val GET_APPEARANCE = "getAppearance"
@@ -66,6 +68,13 @@ object FoxyFlutterChannels {
         const val OPEN_WEB_LOGIN = "openWebLogin"
         const val ACCOUNT_SIGN_OUT = "accountSignOut"
         const val OPEN_EXTERNAL_URL = "openExternalUrl"
+        const val GET_VIDEO_CLIP_STREAM = "getVideoClipStream"
+        const val START_RECOGNITION = "startRecognition"
+        const val STOP_RECOGNITION = "stopRecognition"
+        const val GET_RECOGNITION_STATE = "getRecognitionState"
+        const val GET_RECOGNITION_HISTORY = "getRecognitionHistory"
+        const val CLEAR_RECOGNITION_HISTORY = "clearRecognitionHistory"
+        const val RESOLVE_RECOGNIZED_TRACK = "resolveRecognizedTrack"
         /** Minimize app instead of finishing when Flutter handles the Android back gesture at root. */
         const val MOVE_TASK_TO_BACK = "moveTaskToBack"
         /** One-shot snapshot of the same map as [Events.PLAYER_STATE] `state` (for Flutter UI seeding). */
@@ -100,6 +109,7 @@ object FoxyFlutterChannels {
         const val ERROR = "error"
         /** Newer APK published on GitHub — Flutter shows optional in-app prompt. */
         const val UPDATE_AVAILABLE = "updateAvailable"
+        const val RECOGNITION_STATE = "recognitionState"
     }
 }
 

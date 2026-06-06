@@ -64,4 +64,10 @@ object StreamUrlCache {
             entries.keys.removeAll { it.startsWith("$videoId|") }
         }
     }
+
+    fun clear() {
+        synchronized(lock) {
+            entries.clear()
+        }
+    }
 }

@@ -55,6 +55,7 @@ object FoxyAccount {
             ?.putString(KEY_EMAIL, merged.email)
             ?.putString(KEY_AVATAR, merged.avatarUrl)
             ?.apply()
+        StreamUrlCache.clear()
         _state.value = merged
     }
 
@@ -74,6 +75,7 @@ object FoxyAccount {
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         prefs?.edit()?.clear()?.apply()
+        StreamUrlCache.clear()
         _state.value = FoxyAccountState()
     }
 }

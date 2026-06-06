@@ -19,8 +19,10 @@ import java.io.File
 
 data class FoxyLibraryState(
     val allSongs: List<Song> = emptyList(),
+    val localSongs: List<Song> = emptyList(),
     val downloadedSongs: List<Song> = emptyList(),
     val historySongs: List<Song> = emptyList(),
+    val playCounts: Map<String, Int> = emptyMap(),
     val likedSongs: List<Song> = emptyList(),
     val savedSongs: List<Song> = emptyList(),
     val downloadProgress: Map<String, Float> = emptyMap(),
@@ -35,6 +37,7 @@ data class FoxyLibraryState(
 
     fun getSongById(videoId: String): Song? {
         return allSongs.find { it.videoId == videoId }
+            ?: localSongs.find { it.videoId == videoId }
             ?: downloadedSongs.find { it.videoId == videoId }
     }
 }
@@ -69,6 +72,12 @@ object FoxyLibraryStore {
 
     private fun downloadsRoot(context: Context) = FoxyDownloadsPaths.dir(context)
 
+    private fun stateFile(context: Context): File {
+        val dir = context.filesDir
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "library_state_v1.json")
+    }
+
     /**
      * Deletes progressive download files and sidecar meta for [videoId].
      * Flutter often omits [Song.localPath] in method maps, so we must not rely on it alone.
@@ -99,6 +108,7 @@ object FoxyLibraryStore {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        loadPersistedLibrary(context.applicationContext)
         scope.launch {
             delay(80)
             refreshDownloadsFromDisk(context.applicationContext)
@@ -112,6 +122,7 @@ object FoxyLibraryStore {
     suspend fun refreshDownloadsFromDisk(context: Context) {
         publish { it.copy(isLoading = true) }
         val previous = state.value.downloadedSongs
+        val local = withContext(Dispatchers.IO) { FoxyLocalMusic.all(context) }
         val downloaded = withContext(Dispatchers.IO) {
             val allFiles = FoxyDownloadsPaths.listDownloadFiles(context)
             val fromMedia = allFiles
@@ -135,6 +146,7 @@ object FoxyLibraryStore {
         }
         publish {
             it.copy(
+                localSongs = local,
                 downloadedSongs = downloaded,
                 isLoading = false
             )
@@ -149,6 +161,7 @@ object FoxyLibraryStore {
                 else current.likedSongs + song
             current.copy(likedSongs = nextLiked.distinctBy { it.videoId })
         }
+        saveLibrarySnapshotAsync()
         appContext?.let { FoxyBackup.requestAutoBackup(it) }
     }
 
@@ -162,13 +175,28 @@ object FoxyLibraryStore {
         }
     }
 
+    fun setLocalSongs(songs: List<Song>) {
+        publish { current ->
+            current.copy(
+                localSongs = songs.distinctBy { it.videoId },
+                allSongs = (current.allSongs + songs).distinctBy { it.videoId },
+            )
+        }
+    }
+
     fun addHistory(song: Song) {
         publish { current ->
             val nextHistory = (listOf(song) + current.historySongs)
                 .distinctBy { it.videoId }
                 .take(200)
-            current.copy(historySongs = nextHistory)
+            val nextCounts = current.playCounts.toMutableMap()
+            nextCounts[song.videoId] = (nextCounts[song.videoId] ?: 0) + 1
+            current.copy(
+                historySongs = nextHistory,
+                playCounts = nextCounts.toMap(),
+            )
         }
+        saveLibrarySnapshotAsync()
         appContext?.let { FoxyBackup.requestAutoBackup(it) }
     }
 
@@ -225,21 +253,80 @@ object FoxyLibraryStore {
         return JSONObject().apply {
             put("liked", songsJson(current.likedSongs))
             put("history", songsJson(current.historySongs))
+            put(
+                "playCounts",
+                JSONObject().apply {
+                    current.playCounts.forEach { (videoId, count) ->
+                        put(videoId, count)
+                    }
+                },
+            )
         }
     }
 
     fun restoreFromJson(root: JSONObject) {
         val liked = root.optJSONArray("liked").songsFromBackupJson()
         val history = root.optJSONArray("history").songsFromBackupJson().take(200)
+        val playCounts = root.optJSONObject("playCounts").toPlayCounts()
         publish { current ->
             current.copy(
                 likedSongs = liked.distinctBy { it.videoId },
                 historySongs = history.distinctBy { it.videoId },
+                playCounts = if (playCounts.isNotEmpty()) {
+                    playCounts
+                } else {
+                    history.associate { it.videoId to 1 }
+                },
+            )
+        }
+        saveLibrarySnapshotAsync()
+    }
+
+    // ====================== Private ======================
+
+    private fun loadPersistedLibrary(context: Context) {
+        val root = runCatching {
+            val file = stateFile(context)
+            if (!file.exists() || file.length() <= 0L) return@runCatching null
+            JSONObject(file.readText())
+        }.getOrNull() ?: return
+        val liked = root.optJSONArray("liked").songsFromBackupJson()
+        val history = root.optJSONArray("history").songsFromBackupJson().take(200)
+        val playCounts = root.optJSONObject("playCounts").toPlayCounts()
+        publish { current ->
+            current.copy(
+                likedSongs = liked.distinctBy { it.videoId },
+                historySongs = history.distinctBy { it.videoId },
+                playCounts = if (playCounts.isNotEmpty()) {
+                    playCounts
+                } else {
+                    history.associate { it.videoId to 1 }
+                },
             )
         }
     }
 
-    // ====================== Private ======================
+    private fun saveLibrarySnapshotAsync() {
+        val context = appContext ?: return
+        scope.launch {
+            runCatching {
+                stateFile(context).writeText(snapshotJson().toString())
+            }
+        }
+    }
+
+    private fun JSONObject?.toPlayCounts(): Map<String, Int> {
+        if (this == null) return emptyMap()
+        val out = LinkedHashMap<String, Int>()
+        val keys = keys()
+        while (keys.hasNext()) {
+            val videoId = keys.next().trim()
+            if (videoId.isBlank()) continue
+            val count = optInt(videoId, 0)
+            if (count > 0) out[videoId] = count
+        }
+        return out
+    }
 
     private fun readDownloadMeta(context: Context, videoId: String): Song? =
         FoxyOfflineBundle.songFromStoredMeta(context, videoId)

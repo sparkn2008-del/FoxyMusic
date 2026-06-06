@@ -37,7 +37,7 @@ import kotlin.math.min
 
 @OptIn(UnstableApi::class)
 /**
- * Media3 session service — rich media-style notification (Metrolist / YT Music–style shade card)
+ * Media3 session service — rich media-style notification (Foxy / YT Music–style shade card)
  * wired to ExoPlayer in [MusicPlayer].
  */
 class FoxyMediaSessionService : MediaSessionService() {

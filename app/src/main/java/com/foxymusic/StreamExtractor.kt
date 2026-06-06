@@ -8,13 +8,18 @@ import android.util.Log
 import okhttp3.Call
 import okhttp3.Callback
 import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.CancellableCall
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request as NewPipeRequest
 import org.schabi.newpipe.extractor.downloader.Response as NewPipeResponse
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
+import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
 import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -31,6 +36,7 @@ data class StreamResult(
     val mimeType: String? = null,
     val sampleRate: Int? = null,
     val itag: Int? = null,
+    val qualityLabel: String? = null,
 )
 
 private data class StreamFormat(
@@ -40,6 +46,12 @@ private data class StreamFormat(
     val mimeType: String,
     val sampleRate: Int?,
     val itag: Int,
+    val channelCount: Int?,
+)
+
+private data class QualityPreference(
+    val maxBitrate: Int? = null,
+    val targetBitrate: Int? = null,
 )
 
 private data class YouTubeClient(
@@ -189,15 +201,46 @@ object StreamExtractor {
     fun getStreamResult(videoId: String): StreamResult =
         getStreamResult(videoId, FoxySettings.state.value.streamQualityTier)
 
-    fun getStreamResult(videoId: String, qualityTier: Int): StreamResult {
-        val tier = qualityTier.coerceIn(0, 3)
+    fun getVideoClipResult(
+        videoId: String,
+        title: String? = null,
+        artist: String? = null,
+    ): StreamResult =
+        getVideoClipResult(videoId, 720, title, artist)
+
+    fun getStreamResult(videoId: String, qualityTier: Int, searchQuery: String? = null): StreamResult {
+        val tier = qualityTier.coerceIn(0, 4)
+        val sourcePriority = FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
         val maxBitrate = maxBitrateForTier(tier)
         val extractorErrors = mutableListOf<String>()
         var lastError: String? = null
 
-        StreamUrlCache.peekResult(videoId, tier)?.let { cached ->
+        peekCachedStreamResult(videoId, tier, searchQuery)?.let { cached ->
             Log.d(TAG, "Stream cache hit for $videoId")
             return cached.copy(source = cached.source ?: "cache")
+        }
+
+        val soundCloudRef = soundCloudRef(videoId)
+        if (soundCloudRef != null) {
+            when (val result = getSoundCloudStreamResult(soundCloudRef, maxBitrate, isUrl = true)) {
+                is ExtractorAttempt.Success -> {
+                    val stream = result.toStreamResult()
+                    StreamUrlCache.put(videoId, tier, stream)
+                    return stream
+                }
+                is ExtractorAttempt.Failure -> extractorErrors += "SoundCloud: ${result.message}"
+            }
+        }
+
+        if (tier >= 3 && sourcePriority == 2 && !searchQuery.isNullOrBlank()) {
+            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+                is ExtractorAttempt.Success -> {
+                    val stream = result.toStreamResult()
+                    StreamUrlCache.put(videoId, tier, stream)
+                    return stream
+                }
+                is ExtractorAttempt.Failure -> extractorErrors += "SoundCloud: ${result.message}"
+            }
         }
 
         val clientOrder = clientsForTier(tier)
@@ -207,7 +250,7 @@ object StreamExtractor {
             try {
                 val futures = clientOrder.take(parallelCount).map { ytClient ->
                     pool.submit<StreamResult?> {
-                        tryInnertubeClient(videoId, ytClient, maxBitrate)
+                        tryInnertubeClient(videoId, ytClient, maxBitrate, tier)
                     }
                 }
                 for (future in futures) {
@@ -215,7 +258,18 @@ object StreamExtractor {
                         val attempt = future.get(10, TimeUnit.SECONDS)
                         if (attempt?.url != null) {
                             futures.forEach { it.cancel(true) }
-                            return cacheAndReturn(videoId, tier, attempt)
+                            return cacheAndReturn(
+                                videoId,
+                                tier,
+                                maybeUpgradeUltraWithAlternateSource(
+                                    videoId,
+                                    tier,
+                                    attempt,
+                                    searchQuery,
+                                    sourcePriority,
+                                    maxBitrate,
+                                ),
+                            )
                         }
                         attempt?.error?.let {
                             lastError = it
@@ -231,9 +285,20 @@ object StreamExtractor {
         }
 
         for (ytClient in clientOrder.drop(parallelCount)) {
-            val attempt = tryInnertubeClient(videoId, ytClient, maxBitrate)
+            val attempt = tryInnertubeClient(videoId, ytClient, maxBitrate, tier)
             if (attempt.url != null) {
-                return cacheAndReturn(videoId, tier, attempt)
+                return cacheAndReturn(
+                    videoId,
+                    tier,
+                    maybeUpgradeUltraWithAlternateSource(
+                        videoId,
+                        tier,
+                        attempt,
+                        searchQuery,
+                        sourcePriority,
+                        maxBitrate,
+                    ),
+                )
             }
             attempt.error?.let {
                 lastError = it
@@ -245,21 +310,88 @@ object StreamExtractor {
         when (val newPipeResult = getNewPipeStreamResult(videoId, maxBitrate)) {
             is ExtractorAttempt.Success -> {
                 Log.d(TAG, "NewPipe stream selected: ${newPipeResult.url.take(80)}")
-                val result = StreamResult(
-                    newPipeResult.url,
-                    source = "NewPipe",
-                    bitrate = newPipeResult.bitrate,
-                    codec = newPipeResult.codec,
+                val result = newPipeResult.toStreamResult()
+                val best = maybeUpgradeUltraWithAlternateSource(
+                    videoId,
+                    tier,
+                    result,
+                    searchQuery,
+                    sourcePriority,
+                    maxBitrate,
                 )
-                StreamUrlCache.put(videoId, tier, result)
-                return result
+                StreamUrlCache.put(videoId, tier, best)
+                return best
             }
             is ExtractorAttempt.Failure -> {
                 extractorErrors += "NewPipe: ${newPipeResult.message}"
                 Log.w(TAG, "NewPipe failed: ${newPipeResult.message}", newPipeResult.throwable)
             }
         }
+
+        if (tier >= 3 && sourcePriority == 1 && !searchQuery.isNullOrBlank()) {
+            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+                is ExtractorAttempt.Success -> {
+                    val stream = result.toStreamResult()
+                    StreamUrlCache.put(videoId, tier, stream)
+                    return stream
+                }
+                is ExtractorAttempt.Failure -> {
+                    extractorErrors += "SoundCloud: ${result.message}"
+                    Log.w(TAG, "SoundCloud fallback failed: ${result.message}", result.throwable)
+                }
+            }
+        }
         return StreamResult(null, extractorErrors.joinToString("\n").ifBlank { "Could not fetch stream URL" })
+    }
+
+    fun getVideoClipResult(
+        videoId: String,
+        targetHeight: Int,
+        title: String? = null,
+        artist: String? = null,
+    ): StreamResult {
+        val maxHeight = targetHeight.coerceIn(240, 1080)
+        val extractorErrors = mutableListOf<String>()
+        val clientOrder = clientsForTier(0)
+        for (ytClient in clientOrder) {
+            val attempt = tryInnertubeVideoClient(videoId, ytClient, maxHeight)
+            if (attempt.url != null) return attempt
+            attempt.error?.let { extractorErrors += it }
+        }
+
+        val relatedSongs = if (title.isNullOrBlank() && artist.isNullOrBlank()) {
+            emptyList<Song>()
+        } else {
+            clipCandidateSongs(title, artist)
+        }
+
+        for (candidate in relatedSongs) {
+            val candidateId = candidate.videoId.trim()
+            if (candidateId.isBlank() || candidateId == videoId) continue
+            for (ytClient in clientOrder) {
+                val attempt = tryInnertubeVideoClient(candidateId, ytClient, maxHeight)
+                if (attempt.url != null) return attempt
+                attempt.error?.let { extractorErrors += "Related candidate " + candidateId + ": " + it }
+            }
+        }
+
+        return StreamResult(
+            null,
+            extractorErrors.joinToString("\n").ifBlank { "Could not fetch video clip stream" },
+        )
+    }
+
+    fun peekCachedStreamResult(videoId: String, qualityTier: Int, searchQuery: String? = null): StreamResult? {
+        val tier = qualityTier.coerceIn(0, 4)
+        val sourcePriority = FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
+        val cached = StreamUrlCache.peekResult(videoId, tier) ?: return null
+        val wantsSoundCloudFirst = tier >= 3 &&
+            sourcePriority == 2 &&
+            !searchQuery.isNullOrBlank() &&
+            cached.source?.contains("SoundCloud", ignoreCase = true) != true
+        val youtubeOnlyRejectsSoundCloud = sourcePriority == 0 &&
+            cached.source?.contains("SoundCloud", ignoreCase = true) == true
+        return if (wantsSoundCloudFirst || youtubeOnlyRejectsSoundCloud) null else cached
     }
 
     private fun cacheAndReturn(videoId: String, tier: Int, result: StreamResult): StreamResult {
@@ -267,65 +399,171 @@ object StreamExtractor {
         return result
     }
 
+    private fun maybeUpgradeUltraWithAlternateSource(
+        videoId: String,
+        tier: Int,
+        current: StreamResult,
+        searchQuery: String?,
+        sourcePriority: Int,
+        maxBitrate: Int?,
+    ): StreamResult {
+        if (tier < 3 || searchQuery.isNullOrBlank()) return current
+        if (current.isLosslessLike()) return current
+        val alternate = when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+            is ExtractorAttempt.Success -> result.toStreamResult()
+            is ExtractorAttempt.Failure -> {
+                Log.d(TAG, "Ultra alternate source unavailable for $videoId: ${result.message}")
+                return current
+            }
+        }
+        val alternateWins = alternate.ultraQualityScore() > current.ultraQualityScore()
+        if (sourcePriority == 0 && !alternate.isLosslessLike() && !alternateWins) {
+            return current
+        }
+        return if (alternateWins) alternate else current
+    }
+
     private fun tryInnertubeClient(
         videoId: String,
         ytClient: YouTubeClient,
         maxBitrate: Int?,
+        qualityTier: Int,
     ): StreamResult {
         return try {
-            val body = buildPlayerBody(videoId, ytClient)
-            val request = Request.Builder()
-                .url("https://www.youtube.com/youtubei/v1/player?key=${ytClient.apiKey}")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .addHeader("User-Agent", ytClient.userAgent)
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Origin", ytClient.origin)
-                .addHeader("Referer", "${ytClient.referer}$videoId")
-                .addHeader("X-YouTube-Client-Name", ytClient.clientNameHeader)
-                .addHeader("X-YouTube-Client-Version", ytClient.version)
-                .addFoxyAccountHeaders(ytClient.origin)
-                .build()
+            val executeAttempt = { includeAccountHeaders: Boolean ->
+                val body = buildPlayerBody(videoId, ytClient)
+                val request = Request.Builder()
+                    .url("https://www.youtube.com/youtubei/v1/player?key=${ytClient.apiKey}")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .addHeader("User-Agent", ytClient.userAgent)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Origin", ytClient.origin)
+                    .addHeader("Referer", "${ytClient.referer}$videoId")
+                    .addHeader("X-YouTube-Client-Name", ytClient.clientNameHeader)
+                    .addHeader("X-YouTube-Client-Version", ytClient.version)
+                    .apply {
+                        if (includeAccountHeaders) addFoxyAccountHeaders(ytClient.origin)
+                    }
+                    .build()
 
-            httpClient().newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val err = "YouTube player request failed (${response.code})"
-                    Log.w(TAG, "${ytClient.name} HTTP failed: ${response.code}")
-                    return StreamResult(null, error = "${ytClient.name}: $err")
+                httpClient().newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val err = "YouTube player request failed (${response.code})"
+                        Log.w(TAG, "${ytClient.name} HTTP failed: ${response.code}")
+                        return@use StreamResult(null, error = "${ytClient.name}: $err")
+                    }
+
+                    val responseStr = response.body?.string().orEmpty()
+                    val json = JSONObject(responseStr)
+                    val status = json.optJSONObject("playabilityStatus")
+                    val playability = status?.optString("status").orEmpty()
+
+                    if (playability.isNotBlank() && playability != "OK") {
+                        val reason = status?.optString("reason").takeUnless { it.isNullOrBlank() }
+                            ?.let { "${ytClient.name}: $it" }
+                            ?: "${ytClient.name}: This video is not playable"
+                        return@use StreamResult(null, error = reason)
+                    }
+
+                    val streamingData = json.optJSONObject("streamingData")
+                    val stream = streamingData?.let {
+                        pickBestPlayableStream(it, maxBitrate, qualityTier)
+                    }
+                    if (stream != null) {
+                        Log.d(TAG, "${ytClient.name} stream selected: itag=${stream.itag} ${stream.codec} ${stream.bitrate}bps")
+                        return@use StreamResult(
+                            stream.url,
+                            source = ytClient.name,
+                            bitrate = stream.bitrate.takeIf { it > 0 },
+                            codec = stream.codec,
+                            mimeType = stream.mimeType,
+                            sampleRate = stream.sampleRate,
+                            itag = stream.itag.takeIf { it > 0 },
+                            qualityLabel = stream.qualityLabel(),
+                        )
+                    }
+
+                    StreamResult(null, error = "${ytClient.name}: No direct audio stream was returned")
                 }
-
-                val responseStr = response.body?.string().orEmpty()
-                val json = JSONObject(responseStr)
-                val status = json.optJSONObject("playabilityStatus")
-                val playability = status?.optString("status").orEmpty()
-
-                if (playability.isNotBlank() && playability != "OK") {
-                    val reason = status?.optString("reason").takeUnless { it.isNullOrBlank() }
-                        ?.let { "${ytClient.name}: $it" }
-                        ?: "${ytClient.name}: This video is not playable"
-                    return StreamResult(null, error = reason)
-                }
-
-                val streamingData = json.optJSONObject("streamingData")
-                val stream = streamingData?.let { pickBestPlayableStream(it, maxBitrate) }
-                if (stream != null) {
-                    Log.d(TAG, "${ytClient.name} stream selected: itag=${stream.itag} ${stream.codec} ${stream.bitrate}bps")
-                    return StreamResult(
-                        stream.url,
-                        source = ytClient.name,
-                        bitrate = stream.bitrate.takeIf { it > 0 },
-                        codec = stream.codec,
-                        mimeType = stream.mimeType,
-                        sampleRate = stream.sampleRate,
-                        itag = stream.itag.takeIf { it > 0 },
-                    )
-                }
-
-                StreamResult(null, error = "${ytClient.name}: No direct audio stream was returned")
             }
+
+            return executeAttempt(false)
         } catch (e: Exception) {
             val msg = "${ytClient.name}: ${e.message ?: "Could not fetch stream URL"}"
             Log.w(TAG, "Innertube client failed: ${ytClient.name}", e)
+            StreamResult(null, error = msg)
+        }
+    }
+
+    private fun tryInnertubeVideoClient(
+        videoId: String,
+        ytClient: YouTubeClient,
+        maxHeight: Int?,
+    ): StreamResult {
+        return try {
+            val executeAttempt = { includeAccountHeaders: Boolean ->
+                val body = buildPlayerBody(videoId, ytClient)
+                val request = Request.Builder()
+                    .url("https://www.youtube.com/youtubei/v1/player?key=${ytClient.apiKey}")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .addHeader("User-Agent", ytClient.userAgent)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Origin", ytClient.origin)
+                    .addHeader("Referer", "${ytClient.referer}$videoId")
+                    .addHeader("X-YouTube-Client-Name", ytClient.clientNameHeader)
+                    .addHeader("X-YouTube-Client-Version", ytClient.version)
+                    .apply {
+                        if (includeAccountHeaders) addFoxyAccountHeaders(ytClient.origin)
+                    }
+                    .build()
+
+                httpClient().newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val err = "YouTube player request failed (${response.code})"
+                        Log.w(TAG, "${ytClient.name} video HTTP failed: ${response.code}")
+                        return@use StreamResult(null, error = "${ytClient.name}: $err")
+                    }
+
+                    val responseStr = response.body?.string().orEmpty()
+                    val json = JSONObject(responseStr)
+                    val status = json.optJSONObject("playabilityStatus")
+                    val playability = status?.optString("status").orEmpty()
+
+                    if (playability.isNotBlank() && playability != "OK") {
+                        val reason = status?.optString("reason").takeUnless { it.isNullOrBlank() }
+                            ?.let { "${ytClient.name}: $it" }
+                            ?: "${ytClient.name}: This video is not playable"
+                        return@use StreamResult(null, error = reason)
+                    }
+
+                    val streamingData = json.optJSONObject("streamingData")
+                    val stream = streamingData?.let { pickBestPlayableVideoStream(it, maxHeight) }
+                    if (stream != null) {
+                        val height = stream.optInt("height", 0).takeIf { it > 0 }
+                        val quality = stream.optString("qualityLabel")
+                            .takeIf { it.isNotBlank() }
+                            ?: height?.let { "${it}p" }
+                        return@use StreamResult(
+                            stream.directUrl(),
+                            source = ytClient.name,
+                            bitrate = stream.optInt("bitrate", 0).takeIf { it > 0 },
+                            codec = stream.optString("mimeType"),
+                            mimeType = stream.optString("mimeType"),
+                            itag = stream.optInt("itag", 0).takeIf { it > 0 },
+                            qualityLabel = quality,
+                        )
+                    }
+
+                    StreamResult(null, error = "${ytClient.name}: No video stream was returned")
+                }
+            }
+
+            return executeAttempt(false)
+        } catch (e: Exception) {
+            val msg = "${ytClient.name}: ${e.message ?: "Could not fetch video clip URL"}"
+            Log.w(TAG, "Innertube video client failed: ${ytClient.name}", e)
             StreamResult(null, error = msg)
         }
     }
@@ -357,11 +595,15 @@ object StreamExtractor {
         return body
     }
 
-    private fun maxBitrateForTier(tier: Int): Int? = when (tier) {
-        0 -> 96_000
-        1 -> 160_000
-        else -> null
+    private fun qualityPreferenceForTier(tier: Int): QualityPreference = when (tier) {
+        0 -> QualityPreference(maxBitrate = 96_000, targetBitrate = 64_000)
+        1 -> QualityPreference(maxBitrate = 112_000, targetBitrate = 96_000)
+        2 -> QualityPreference(maxBitrate = 160_000, targetBitrate = 128_000)
+        3 -> QualityPreference(maxBitrate = 320_000, targetBitrate = 256_000)
+        else -> QualityPreference(maxBitrate = null, targetBitrate = 1_000_000)
     }
+
+    private fun maxBitrateForTier(tier: Int): Int? = qualityPreferenceForTier(tier).maxBitrate
 
     private fun clientsForTier(tier: Int): List<YouTubeClient> =
         if (tier >= 3) {
@@ -380,17 +622,26 @@ object StreamExtractor {
             clients
         }
 
-    private fun pickBestPlayableStream(streamingData: JSONObject, maxBitrate: Int?): StreamFormat? {
+    private fun pickBestPlayableStream(
+        streamingData: JSONObject,
+        maxBitrate: Int?,
+        tier: Int,
+    ): StreamFormat? {
         val candidates = mutableListOf<JSONObject>()
         streamingData.optJSONArray("adaptiveFormats")?.appendAudioFormatsTo(candidates)
         streamingData.optJSONArray("formats")?.appendAudioFormatsTo(candidates)
+        val preference = qualityPreferenceForTier(tier)
 
         val sorted = candidates
             .sortedWith(
-                compareByDescending<JSONObject> { it.codecScore() }
-                    .thenByDescending { it.itagScore() }
-                    .thenByDescending { it.optInt("bitrate") }
+                compareByDescending<JSONObject> {
+                    it.optInt("audioChannels", 2).coerceAtLeast(1) >= 2
+                }
+                    .thenByDescending { it.qualityPreferenceScore(preference, tier) }
+                    .thenByDescending { it.codecScore() }
                     .thenByDescending { it.optInt("audioQualityRank") }
+                    .thenByDescending { it.optInt("bitrate") }
+                    .thenByDescending { it.itagScore() }
             )
 
         val filtered = if (maxBitrate == null) {
@@ -411,6 +662,7 @@ object StreamExtractor {
                 mimeType = fmt.optString("mimeType"),
                 sampleRate = fmt.optString("audioSampleRate").toIntOrNull(),
                 itag = fmt.optInt("itag", 0),
+                channelCount = fmt.optInt("audioChannels", 0).takeIf { it > 0 },
             )
         }?.let { return it }
 
@@ -424,13 +676,32 @@ object StreamExtractor {
                     mimeType = "application/x-mpegURL",
                     sampleRate = null,
                     itag = 0,
+                    channelCount = null,
                 )
             }
+    }
+
+    private fun JSONObject.qualityPreferenceScore(
+        preference: QualityPreference,
+        tier: Int,
+    ): Int {
+        val bitrate = optInt("bitrate", 0)
+        if (bitrate <= 0) return 0
+        if (tier >= 4) {
+            val ultraFloorBonus = if (bitrate >= 320_000) 250_000 else 0
+            return bitrate + ultraFloorBonus
+        }
+        val target = preference.targetBitrate ?: return bitrate
+        return 1_000_000 - kotlin.math.abs(target - bitrate)
     }
 
     private fun JSONObject.codecScore(): Int {
         val mime = optString("mimeType")
         return when {
+            mime.contains("flac", ignoreCase = true) -> 100
+            mime.contains("alac", ignoreCase = true) -> 96
+            mime.contains("wav", ignoreCase = true) -> 94
+            mime.contains("pcm", ignoreCase = true) -> 92
             mime.contains("opus", ignoreCase = true) -> 40
             mime.contains("webm", ignoreCase = true) -> 30
             mime.contains("mp4a", ignoreCase = true) || mime.contains("aac", ignoreCase = true) -> 20
@@ -451,6 +722,10 @@ object StreamExtractor {
     private fun JSONObject.codecLabel(): String {
         val mime = optString("mimeType")
         return when {
+            mime.contains("flac", ignoreCase = true) -> "FLAC Lossless"
+            mime.contains("alac", ignoreCase = true) -> "ALAC Lossless"
+            mime.contains("wav", ignoreCase = true) -> "WAV Lossless"
+            mime.contains("pcm", ignoreCase = true) -> "PCM Lossless"
             mime.contains("opus", ignoreCase = true) -> "Opus"
             mime.contains("mp4a", ignoreCase = true) || mime.contains("aac", ignoreCase = true) -> "AAC"
             mime.contains("webm", ignoreCase = true) -> "WebM"
@@ -466,6 +741,8 @@ object StreamExtractor {
             val hasAudio = mimeType.startsWith("audio/") || format.has("audioQuality")
             if (hasAudio) {
                 val rank = when (format.optString("audioQuality")) {
+                    "AUDIO_QUALITY_HI_RES_LOSSLESS" -> 6
+                    "AUDIO_QUALITY_LOSSLESS" -> 5
                     "AUDIO_QUALITY_HIGH" -> 3
                     "AUDIO_QUALITY_MEDIUM" -> 2
                     "AUDIO_QUALITY_LOW" -> 1
@@ -475,6 +752,46 @@ object StreamExtractor {
                 target.add(format)
             }
         }
+    }
+
+    private fun JSONArray.appendVideoFormatsTo(target: MutableList<JSONObject>) {
+        for (index in 0 until length()) {
+            val format = optJSONObject(index) ?: continue
+            val mimeType = format.optString("mimeType")
+            val hasVideo = mimeType.startsWith("video/") || format.optInt("height", 0) > 0
+            if (!hasVideo) continue
+            if (mimeType.startsWith("audio/")) continue
+            target.add(format)
+        }
+    }
+
+    private fun pickBestPlayableVideoStream(
+        streamingData: JSONObject,
+        maxHeight: Int?,
+    ): JSONObject? {
+        val candidates = mutableListOf<JSONObject>()
+        streamingData.optJSONArray("formats")?.appendVideoFormatsTo(candidates)
+        streamingData.optJSONArray("adaptiveFormats")?.appendVideoFormatsTo(candidates)
+        if (candidates.isEmpty()) return null
+        val target = maxHeight ?: 720
+        val filtered = maxHeight?.let { limit ->
+            candidates.filter { fmt ->
+                val h = fmt.optInt("height", 0)
+                h == 0 || h <= limit
+            }.ifEmpty { candidates }
+        } ?: candidates
+        val ordered = filtered.sortedWith(
+            compareBy<JSONObject>(
+                { fmt ->
+                    val h = fmt.optInt("height", 0).takeIf { it > 0 } ?: Int.MAX_VALUE
+                    kotlin.math.abs(target - h)
+                },
+                { -it.optInt("height", 0) },
+                { -it.optInt("bitrate", 0) },
+                { -it.optInt("fps", 0) },
+            )
+        )
+        return ordered.firstOrNull { it.directUrl() != null }
     }
 
     private fun JSONObject.directUrl(): String? {
@@ -506,12 +823,53 @@ object StreamExtractor {
         }
     }
 
-    private fun getNewPipeStreamResult(videoId: String, maxBitrate: Int?): ExtractorAttempt {
+    private fun getSoundCloudStreamResult(
+        queryOrUrl: String,
+        maxBitrate: Int?,
+        isUrl: Boolean,
+    ): ExtractorAttempt {
+        return try {
+            ensureNewPipe()
+            val service = ServiceList.SoundCloud
+            val streamUrl = if (isUrl) {
+                queryOrUrl
+            } else {
+                val searchInfo = SearchInfo.getInfo(service, service.searchQHFactory.fromQuery(queryOrUrl))
+                val candidate = searchInfo.relatedItems
+                    .filterIsInstance<StreamInfoItem>()
+                    .maxByOrNull { soundCloudMatchScore(queryOrUrl, it) }
+                    ?: return ExtractorAttempt.Failure("No SoundCloud result for $queryOrUrl")
+                val score = soundCloudMatchScore(queryOrUrl, candidate)
+                if (score < 0.28) {
+                    return ExtractorAttempt.Failure("No close SoundCloud match for $queryOrUrl")
+                }
+                candidate.url
+            }
+            getNewPipeServiceStreamResult(service, streamUrl, maxBitrate, "SoundCloud")
+        } catch (e: Exception) {
+            ExtractorAttempt.Failure("${e::class.java.simpleName}: ${e.message}", e)
+        }
+    }
+
+    private fun getNewPipeStreamResult(videoId: String, maxBitrate: Int?): ExtractorAttempt =
+        getNewPipeServiceStreamResult(
+            ServiceList.YouTube,
+            "https://www.youtube.com/watch?v=$videoId",
+            maxBitrate,
+            "NewPipe",
+        )
+
+    private fun getNewPipeServiceStreamResult(
+        service: org.schabi.newpipe.extractor.StreamingService,
+        url: String,
+        maxBitrate: Int?,
+        source: String,
+    ): ExtractorAttempt {
         return try {
             ensureNewPipe()
             val streamInfo = StreamInfo.getInfo(
-                NewPipe.getService(0),
-                "https://www.youtube.com/watch?v=$videoId"
+                service,
+                url
             )
 
             val candidates = streamInfo.audioStreams.filter { !it.content.isNullOrBlank() }
@@ -525,8 +883,10 @@ object StreamExtractor {
             }
 
             val audioStream = filtered.maxWithOrNull(
-                compareBy({ stream -> if (stream.format?.name?.contains("opus", true) == true) 1 else 0 },
-                    { stream -> stream.averageBitrate ?: 0 })
+                compareBy(
+                    { stream -> newPipeCodecScore(stream.format?.name) },
+                    { stream -> stream.averageBitrate ?: 0 },
+                )
             )
 
             val url = audioStream?.content
@@ -539,11 +899,213 @@ object StreamExtractor {
                     url,
                     bitrate = audioStream.averageBitrate?.let { it * 1000 },
                     codec = audioStream.format?.name,
+                    source = source,
+                    qualityLabel = qualityLabel(
+                        audioStream.format?.name,
+                        audioStream.averageBitrate?.let { it * 1000 },
+                    ),
                 )
             }
         } catch (e: Exception) {
             ExtractorAttempt.Failure("${e::class.java.simpleName}: ${e.message}", e)
         }
+    }
+
+    private fun soundCloudRef(ref: String): String? {
+        val trimmed = ref.trim()
+        if (trimmed.startsWith("https://soundcloud.com/", ignoreCase = true)) return trimmed
+        if (trimmed.startsWith("http://soundcloud.com/", ignoreCase = true)) return trimmed
+        return null
+    }
+
+    private fun soundCloudMatchScore(query: String, item: StreamInfoItem): Double {
+        val target = "${item.name} ${item.uploaderName}".normalizedSearchTokens()
+        val source = query.normalizedSearchTokens()
+        if (source.isEmpty() || target.isEmpty()) return 0.0
+        val hits = source.count { it in target }
+        val coverage = hits.toDouble() / source.size.toDouble()
+        val titleBonus = if (item.name.normalizedSearchText() in query.normalizedSearchText() ||
+            query.normalizedSearchText() in item.name.normalizedSearchText()
+        ) {
+            0.18
+        } else {
+            0.0
+        }
+        return coverage + titleBonus
+    }
+
+    private fun clipCandidateSongs(title: String?, artist: String?): List<Song> {
+        val queries = clipSearchQueries(title, artist)
+        if (queries.isEmpty()) return emptyList()
+
+        val deduped = linkedMapOf<String, Song>()
+        for (query in queries) {
+            val batch = runCatching {
+                runBlocking(Dispatchers.IO) {
+                    YTMusicApi.videos(query).take(12)
+                }
+            }.getOrDefault(emptyList())
+            for (song in batch) {
+                val id = song.videoId.trim()
+                if (id.isBlank()) continue
+                deduped.putIfAbsent(id, song)
+            }
+        }
+
+        return deduped.values
+            .sortedByDescending { clipCandidateScore(it, title, artist) }
+            .take(8)
+    }
+
+    private fun clipSearchQueries(title: String?, artist: String?): List<String> {
+        val cleanTitle = title.orEmpty().trim()
+        val cleanArtist = artist.orEmpty().trim()
+        val queries = linkedSetOf<String>()
+
+        fun add(query: String?) {
+            val q = query.orEmpty().trim()
+            if (q.isNotBlank()) queries += q
+        }
+
+        add(listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" "))
+        add(cleanTitle)
+        add(cleanArtist)
+        add("$cleanTitle official video")
+        add("$cleanTitle official music video")
+        add("$cleanTitle music video")
+        add("$cleanTitle audio")
+        add("$cleanArtist $cleanTitle")
+
+        return queries.toList()
+    }
+
+    private fun clipCandidateScore(song: Song, title: String?, artist: String?): Double {
+        val queryTitle = title.orEmpty().normalizedSearchText()
+        val queryArtist = artist.orEmpty().normalizedSearchText()
+        val candidateTitle = song.title.normalizedSearchText()
+        val candidateArtist = song.artist.normalizedSearchText()
+        val queryTokens = listOf(queryTitle, queryArtist)
+            .joinToString(" ")
+            .normalizedSearchTokens()
+        val candidateTokens = "$candidateTitle $candidateArtist".normalizedSearchTokens()
+        if (candidateTokens.isEmpty()) return 0.0
+
+        val hits = queryTokens.count { it in candidateTokens }
+        var score = if (queryTokens.isEmpty()) 0.0 else hits.toDouble() / queryTokens.size.toDouble()
+
+        if (queryTitle.isNotBlank() && (
+                candidateTitle.contains(queryTitle) ||
+                    queryTitle.contains(candidateTitle)
+                )
+        ) {
+            score += 0.30
+        }
+        if (queryArtist.isNotBlank() && (
+                candidateArtist.contains(queryArtist) ||
+                    queryArtist.contains(candidateArtist)
+                )
+        ) {
+            score += 0.20
+        }
+
+        val bestTitle = "$candidateTitle $candidateArtist"
+        score -= clipCandidatePenalty(bestTitle)
+        if (candidateTitle.contains("official", ignoreCase = true)) {
+            score += 0.08
+        }
+        if (candidateTitle.contains("video", ignoreCase = true)) {
+            score += 0.04
+        }
+
+        return score
+    }
+
+    private fun clipCandidatePenalty(text: String): Double {
+        val lowered = text.lowercase()
+        val badTerms = listOf(
+            "lyrics",
+            "lyric",
+            "cover",
+            "live",
+            "instrumental",
+            "slowed",
+            "speed up",
+            "sped up",
+            "nightcore",
+            "remix",
+            "edit",
+            "reverb",
+            "8d",
+            "karaoke",
+            "reaction",
+            "tutorial",
+        )
+        val hits = badTerms.count { lowered.contains(it) }
+        return when {
+            hits <= 0 -> 0.0
+            hits == 1 -> 0.25
+            hits == 2 -> 0.45
+            else -> 0.65
+        }
+    }
+
+    private fun ExtractorAttempt.Success.toStreamResult(): StreamResult =
+        StreamResult(
+            url,
+            source = source,
+            bitrate = bitrate,
+            codec = codec,
+            qualityLabel = qualityLabel ?: qualityLabel(codec, bitrate),
+        )
+
+    private fun StreamFormat.qualityLabel(): String? = qualityLabel(codec, bitrate)
+
+    private fun StreamResult.isLosslessLike(): Boolean =
+        losslessCodecScore(codec ?: mimeType ?: qualityLabel) >= 90
+
+    private fun StreamResult.ultraQualityScore(): Int {
+        val codecPart = losslessCodecScore(codec ?: mimeType ?: qualityLabel)
+            .takeIf { it > 0 }
+            ?: lossyCodecScore(codec ?: mimeType ?: qualityLabel)
+        return codecPart * 1_000_000 + (bitrate ?: 0)
+    }
+
+    private fun newPipeCodecScore(name: String?): Int =
+        losslessCodecScore(name).takeIf { it > 0 } ?: lossyCodecScore(name)
+
+    private fun losslessCodecScore(name: String?): Int {
+        val s = name.orEmpty()
+        return when {
+            s.contains("flac", ignoreCase = true) -> 100
+            s.contains("alac", ignoreCase = true) -> 96
+            s.contains("wav", ignoreCase = true) -> 94
+            s.contains("pcm", ignoreCase = true) -> 92
+            else -> 0
+        }
+    }
+
+    private fun lossyCodecScore(name: String?): Int {
+        val s = name.orEmpty()
+        return when {
+            s.contains("opus", ignoreCase = true) -> 40
+            s.contains("webm", ignoreCase = true) -> 30
+            s.contains("aac", ignoreCase = true) || s.contains("mp4a", ignoreCase = true) -> 20
+            s.contains("m4a", ignoreCase = true) || s.contains("mp4", ignoreCase = true) -> 10
+            else -> 0
+        }
+    }
+
+    private fun qualityLabel(codec: String?, bitrate: Int?): String? {
+        val c = codec.orEmpty()
+        val base = when {
+            c.contains("flac", ignoreCase = true) -> "FLAC Lossless"
+            c.contains("alac", ignoreCase = true) -> "ALAC Lossless"
+            c.contains("wav", ignoreCase = true) -> "WAV Lossless"
+            c.contains("pcm", ignoreCase = true) -> "PCM Lossless"
+            c.isNotBlank() -> c
+            else -> return null
+        }
+        return bitrate?.takeIf { it > 0 }?.let { "$base ${(it / 1000)} kbps" } ?: base
     }
 
     private fun ensureNewPipe() {
@@ -568,9 +1130,27 @@ object StreamExtractor {
 }
 
 private sealed class ExtractorAttempt {
-    data class Success(val url: String, val bitrate: Int?, val codec: String?) : ExtractorAttempt()
+    data class Success(
+        val url: String,
+        val bitrate: Int?,
+        val codec: String?,
+        val source: String = "NewPipe",
+        val qualityLabel: String? = null,
+    ) : ExtractorAttempt()
     data class Failure(val message: String, val throwable: Throwable? = null) : ExtractorAttempt()
 }
+
+private fun String.normalizedSearchText(): String =
+    lowercase()
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+
+private fun String.normalizedSearchTokens(): Set<String> =
+    normalizedSearchText()
+        .split(Regex("""\s+"""))
+        .filter { it.length >= 2 && it !in setOf("official", "audio", "video", "lyrics", "lyric") }
+        .toSet()
 
 private class FoxyNewPipeDownloader(
     private val client: OkHttpClient

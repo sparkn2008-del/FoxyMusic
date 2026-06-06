@@ -1,7 +1,7 @@
 package com.foxymusic
 
 /**
- * Paginated YouTube Music radio feed (Metrolist [YouTubeQueue]).
+ * Paginated YouTube Music radio feed (Foxy [YouTubeQueue]).
  * Uses Innertube `next` with playlist id `RDAMVM{videoId}` and continuation tokens.
  */
 data class YtmRadioSession(
@@ -13,7 +13,7 @@ data class YtmRadioSession(
     var relatedBrowseId: String? = null,
     var relatedBrowseParams: String? = null,
     var exhausted: Boolean = false,
-    /** Index of the seed track inside the first Innertube playlist panel (Metrolist currentIndex). */
+    /** Index of the seed track inside the first Innertube playlist panel (Foxy currentIndex). */
     var queueStartIndex: Int = 0,
 ) {
     fun hasMorePages(): Boolean = !exhausted && continuation != null

@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Parses Innertube `next` responses the way Metrolist does: official
+ * Parses Innertube `next` responses the way Foxy does: official
  * [musicQueueRenderer] / [playlistPanelRenderer] order (not random tree walks).
  */
 internal object YtmQueueParser {

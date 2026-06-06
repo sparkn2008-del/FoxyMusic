@@ -148,7 +148,7 @@ object YTMusicApi {
     }
 
     /**
-     * Metrolist-style radio: Innertube `next` with `RDAMVM{videoId}` + continuation pages.
+     * Foxy-style radio: Innertube `next` with `RDAMVM{videoId}` + continuation pages.
      * Returns the first page only (for callers that do not paginate).
      */
     suspend fun radio(seed: Song): List<Song> =
@@ -180,7 +180,7 @@ object YTMusicApi {
 
         var songs = filterRadioCandidates(parsed.songs, seed)
 
-        // Metrolist: empty RDAMVM → retry with video id only (no playlist id).
+        // Foxy: empty RDAMVM → retry with video id only (no playlist id).
         if (isFirstPage && songs.size <= 1 && state.playlistId?.startsWith("RDAMVM") == true) {
             state.playlistId = null
             parsed = requestNextRadioPage(
@@ -269,7 +269,7 @@ object YTMusicApi {
         val json = post("next", body) ?: return YtmNextRadioPage(emptyList(), null, null, null, videoId, playlistId)
         var parsed = YtmQueueParser.parseNextResponse(json, videoId, playlistId)
 
-        // Metrolist: merge automix playlist tracks after the official radio panel queue.
+        // Foxy: merge automix playlist tracks after the official radio panel queue.
         if (loadAutomix && continuation.isNullOrBlank() && !parsed.automixPlaylistId.isNullOrBlank()) {
             val automixId = parsed.automixPlaylistId!!
             val automixPage = requestNextRadioPage(
