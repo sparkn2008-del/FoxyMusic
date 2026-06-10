@@ -70,7 +70,18 @@ class FoxyFlutterBridge(
             }
         }
     }
-
+    private fun _forceBufferingUpdate() {
+        val current = FoxyPlayerConnection.state.value
+        emit(
+            mapOf(
+                "type" to FoxyFlutterChannels.Events.PLAYER_STATE,
+                "state" to flutterPlayerStateMap(
+                    current.copy(isBuffering = true, isPlaying = false),
+                    includeQueue = true
+                )
+            )
+        )
+    }
     private fun flutterPlayerStateMap(
         ui: PlayerUiState,
         includeQueue: Boolean,
@@ -134,29 +145,39 @@ class FoxyFlutterBridge(
         }
         return payload
     }
-
+    /** Live progress + buffering ke liye strong emit */
+        /** Strong emit with buffering priority */
     private fun emitLivePlayerStateEvent(
         ui: PlayerUiState = FoxyPlayerConnection.state.value,
-        includeQueue: Boolean = true,
+        includeQueue: Boolean = false
     ) {
         if (sinks.isEmpty()) return
+
+        val forceFull = ui.isBuffering || !ui.isPlaying
         emit(
             mapOf(
                 "type" to FoxyFlutterChannels.Events.PLAYER_STATE,
-                "state" to flutterPlayerStateMap(ui, includeQueue),
-            ),
+                "state" to flutterPlayerStateMap(ui, includeQueue || forceFull)
+            )
         )
     }
 
-    /** One immediate + one delayed full snapshot after async play/queue changes. */
-    private fun scheduleFlutterPlayerStatePush() {
-        emitLivePlayerStateEvent(includeQueue = true)
+    /** Aggressive live updates (especially during buffering) */
+    private fun scheduleFlutterPlayerStatePush(includeQueue: Boolean = false) {
+        emitLivePlayerStateEvent(includeQueue = includeQueue)
+
         if (sinks.isEmpty()) return
+
         scope.launch {
-            delay(80)
-            emitLivePlayerStateEvent(includeQueue = true)
+            val delayMs = if (FoxyPlayerConnection.state.value.isBuffering) 80L else 150L
+            delay(delayMs)
+            if (sinks.isNotEmpty()) {
+                emitLivePlayerStateEvent(includeQueue = false)
+            }
         }
     }
+/** Live progress updates ke liye clean function */
+
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -736,7 +757,7 @@ class FoxyFlutterBridge(
                         .onFailure { result.error("mood_failed", it.message ?: "Mood feed failed", null) }
                 }
             }
-            FoxyFlutterChannels.Methods.PLAY -> {
+                                    FoxyFlutterChannels.Methods.PLAY -> {
                 val songMap = call.argument<Map<String, Any?>>("song")
                 val song = songMap?.toSongOrNull()
                 if (song == null) {
@@ -745,6 +766,13 @@ class FoxyFlutterBridge(
                     FoxyPlayerConnection.play(context, song)
                     emitLivePlayerStateEvent()
                     result.success(null)
+
+                    scope.launch {
+                        delay(80)
+                        emitLivePlayerStateEvent()
+                        delay(200)
+                        emitLivePlayerStateEvent(includeQueue = false)
+                    }
                     scheduleFlutterPlayerStatePush()
                 }
             }
@@ -770,7 +798,7 @@ class FoxyFlutterBridge(
                 result.success(null)
                 scheduleFlutterPlayerStatePush()
             }
-            FoxyFlutterChannels.Methods.PLAY_QUEUE -> {
+                            FoxyFlutterChannels.Methods.PLAY_QUEUE -> {
                 val list = call.argument<List<Map<String, Any?>>>("songs").orEmpty()
                 val songs = list.mapNotNull { it.toSongOrNull() }
                 val startIndex = (call.argument<Number>("startIndex")?.toInt() ?: 0).coerceAtLeast(0)
@@ -779,6 +807,18 @@ class FoxyFlutterBridge(
                 if (songs.isEmpty()) {
                     result.error("bad_args", "songs is required", null)
                 } else {
+                    // Force buffering state immediately
+                    val currentState = FoxyPlayerConnection.state.value
+                    emit(
+                        mapOf(
+                            "type" to FoxyFlutterChannels.Events.PLAYER_STATE,
+                            "state" to flutterPlayerStateMap(
+                                currentState.copy(isBuffering = true, isPlaying = false),
+                                includeQueue = true
+                            )
+                        )
+                    )
+
                     FoxyPlayerConnection.playQueue(
                         context,
                         songs,
@@ -786,11 +826,23 @@ class FoxyFlutterBridge(
                         radioTail,
                         offlineQueueOnly,
                     )
-                    emitLivePlayerStateEvent()
                     result.success(null)
+
+                    // Aggressive updates for cold start
+                    scope.launch {
+                        delay(40)
+                        emitLivePlayerStateEvent()
+                        delay(120)
+                        emitLivePlayerStateEvent(includeQueue = false)
+                        delay(250)
+                        emitLivePlayerStateEvent()
+                        delay(500)
+                        emitLivePlayerStateEvent()
+                    }
                     scheduleFlutterPlayerStatePush()
                 }
             }
+            
             FoxyFlutterChannels.Methods.SKIP_TO_QUEUE_INDEX -> {
                 val index = (call.argument<Number>("index")?.toInt() ?: 0).coerceAtLeast(0)
                 FoxyPlayerConnection.skipToQueueIndex(context, index)
@@ -1219,12 +1271,22 @@ class FoxyFlutterBridge(
             else -> result.notImplemented()
         }
     }
-
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-        val sink = events ?: return
-        sinks.add(sink)
-        startBroadcastIfNeeded()
-        maybeScheduleAutoUpdateCheck()
+        if (events == null) return
+        sinks.add(events)
+
+        // Immediate strong update
+        emitLivePlayerStateEvent(includeQueue = true)
+        scheduleFlutterPlayerStatePush(includeQueue = true)
+
+        // Live continuous updates
+        broadcastJob?.cancel()
+        broadcastJob = scope.launch {
+            FoxyPlayerConnection.state.collect { ui ->
+                val forceFull = ui.isBuffering || !ui.isPlaying
+                emitLivePlayerStateEvent(ui, includeQueue = forceFull)
+            }
+        }
     }
 
     /**

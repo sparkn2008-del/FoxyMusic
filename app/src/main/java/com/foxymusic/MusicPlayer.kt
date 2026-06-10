@@ -208,35 +208,37 @@ object MusicPlayer {
     }
 
     private fun startProgressTicker() {
-        progressJob?.cancel()
-        progressJob = scope.launch {
-            while (isActive && player != null) {
-                val p = player ?: break
-                val durRaw = p.duration
-                val dur = if (durRaw != C.TIME_UNSET && durRaw > 0L) durRaw else _state.value.durationMs
-                val pos = p.currentPosition.coerceAtLeast(0L)
-                val buffered =
-                    if (dur > 0L) {
-                        (p.bufferedPosition.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    }
-                _state.update {
-                    it.copy(
-                        positionMs = pos,
-                        durationMs = dur.takeIf { d -> d > 0L } ?: it.durationMs,
-                        bufferedFraction = buffered
-                    )
-                }
-                maybeScheduleEarlyPreload(dur, pos)
-                if (!offlineQueueOnly) scheduleRadioExtendIfNeeded()
-                applyVolumeCrossfade()
-                maybeTriggerCrossfadeAdvance(dur, pos)
-                maybeSkipSponsor(pos)
-                delay(220)
+    progressJob?.cancel()
+    progressJob = scope.launch {
+        while (isActive && player != null) {
+            val p = player ?: break
+            val durRaw = p.duration
+            val dur = if (durRaw != C.TIME_UNSET && durRaw > 0L) durRaw else _state.value.durationMs
+            val pos = p.currentPosition.coerceAtLeast(0L)
+            val buffered = if (dur > 0L) {
+                (p.bufferedPosition.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+
+            _state.update {
+                it.copy(
+                    positionMs = pos,
+                    durationMs = dur.takeIf { d -> d > 0L } ?: it.durationMs,
+                    bufferedFraction = buffered,
+                    isPlaying = p.isPlaying,
+                    isBuffering = p.playbackState == Player.STATE_BUFFERING
+                )
             }
+
+            maybeScheduleEarlyPreload(dur, pos)
+            if (!offlineQueueOnly) scheduleRadioExtendIfNeeded()
+            applyVolumeCrossfade()
+            maybeTriggerCrossfadeAdvance(dur, pos)
+            maybeSkipSponsor(pos)
+
+            delay(180)   // thoda tight kiya for smoother feel
         }
     }
+}
 
     /** SimpMusic-style target level when normalization is enabled (reduces hot masters). */
     private fun effectiveUserVolume(): Float {
