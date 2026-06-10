@@ -191,18 +191,21 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
   bool _dynamicSongColors = true;
   int? _songAccentArgb;
   int _paletteEpoch = 0;
-  String _lastPlayerVideoId = '';
+   String _lastPlayerVideoId = '';
+  Map<String, dynamic> _currentPlayerState = {};   // ← Yeh add karo
   StreamSubscription<dynamic>? _rootEventSub;
 
-  @override
+    @override
   void initState() {
     super.initState();
     _loadAppearance();
     unawaited(_loadAppVersion());
+
     _rootEventSub = _events.receiveBroadcastStream().listen((dynamic event) {
       final map = _asMap(event);
       if (map == null) return;
       final type = map['type']?.toString();
+
       if (type == 'playerState') {
         final state = _asMap(map['state']);
         if (state != null && mounted) {
@@ -211,25 +214,18 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
           final nextAccent = a is num ? a.toInt() : null;
           final pe = state['paletteEpoch'];
           final nextEpoch = pe is num ? pe.toInt() : _paletteEpoch;
-          final accentChanged = nextAccent != _songAccentArgb;
-          final epochChanged = nextEpoch != _paletteEpoch;
           final cs = _asMap(state['currentSong']);
           final vid = cs?['videoId']?.toString() ?? '';
-          final videoChanged = vid != _lastPlayerVideoId;
-          final dynamicChanged = nextDynamic != _dynamicSongColors;
-          if (!dynamicChanged &&
-              !accentChanged &&
-              !epochChanged &&
-              !videoChanged) {
-            return;
-          }
+
           setState(() {
             _dynamicSongColors = nextDynamic;
             _songAccentArgb = nextAccent;
             _paletteEpoch = nextEpoch;
             _lastPlayerVideoId = vid;
+            _currentPlayerState = Map<String, dynamic>.from(state);
           });
-          if (nextDynamic && (accentChanged || epochChanged || videoChanged)) {
+
+          if (vid != _lastPlayerVideoId && nextDynamic) {
             unawaited(_loadAppearance());
           }
         }
@@ -242,15 +238,17 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
         }
       }
     });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _syncPlayerThemeFromNative();
+      unawaited(_syncPlayerThemeFromNative());   // ← unawaited zaroori hai
     });
   }
 
-  Future<void> _syncPlayerThemeFromNative() async {
+    Future<void> _syncPlayerThemeFromNative() async {
     try {
       final map = _asMap(await _method.invokeMethod('getPlayerState'));
       if (map == null || !mounted) return;
+
       final pe = map['paletteEpoch'];
       final nextDynamic = map['dynamicSongColors'] != false;
       final a = map['songAccentArgb'];
@@ -258,18 +256,22 @@ class _FoxyFlutterAppState extends State<FoxyFlutterApp> {
       final nextEpoch = pe is num ? pe.toInt() : _paletteEpoch;
       final cs = _asMap(map['currentSong']);
       final nextVideoId = cs?['videoId']?.toString() ?? '';
+
       if (nextDynamic == _dynamicSongColors &&
           nextAccent == _songAccentArgb &&
           nextEpoch == _paletteEpoch &&
           nextVideoId == _lastPlayerVideoId) {
         return;
       }
+
       setState(() {
         _dynamicSongColors = nextDynamic;
         _songAccentArgb = nextAccent;
         _paletteEpoch = nextEpoch;
         _lastPlayerVideoId = nextVideoId;
+        _currentPlayerState = Map<String, dynamic>.from(map);
       });
+
       if (_dynamicSongColors) {
         unawaited(_loadAppearance());
       }
@@ -960,7 +962,8 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
     WidgetsBinding.instance.addObserver(this);
     unawaited(_accountController.loadFromNative());
     unawaited(_playerController.loadFromNative());
-    _sub = _events.receiveBroadcastStream().listen((dynamic event) {
+    
+        _sub = _events.receiveBroadcastStream().listen((dynamic event) {
       final map = _asMap(event);
       if (map == null) return;
       final type = map['type']?.toString();
@@ -969,6 +972,11 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
         if (state != null) {
           _lastPlayerEventAtMs = DateTime.now().millisecondsSinceEpoch;
           _playerController.applyExternal(state);
+
+          // Full player open hai toh force rebuild
+          if (_nowPlayingSheetOpen && mounted) {
+            setState(() {});        // ← Yeh line add karo
+          }
         }
       } else if (type == 'libraryFeedChanged') {
         _SongMenuContext.invalidate();
