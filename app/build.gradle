@@ -12,15 +12,15 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace 'com.foxymusic'
-    compileSdk 34
+    compileSdk 36
     ndkVersion "28.2.13676358"
 
     defaultConfig {
         applicationId "com.foxymusic"
         minSdk 26
-        targetSdk 34
-        versionCode 6
-        versionName "1.2.2"
+        targetSdk 36
+        versionCode 7
+        versionName "1.3.0"
     }
 
     splits {
@@ -113,8 +113,17 @@ tasks.register("stripReleaseFlutterNativeLibs") {
             include "**/libflutter.so"
             include "**/libapp.so"
         }.files.each { nativeLib ->
-            exec {
-                commandLine stripExe.absolutePath, "--strip-unneeded", nativeLib.absolutePath
+            def process = new ProcessBuilder(
+                stripExe.absolutePath,
+                "--strip-unneeded",
+                nativeLib.absolutePath
+            )
+                .redirectErrorStream(true)
+                .start()
+            def output = process.inputStream.getText("UTF-8")
+            def exitCode = process.waitFor()
+            if (exitCode != 0) {
+                throw new GradleException("llvm-strip failed for ${nativeLib}: ${output}")
             }
         }
     }

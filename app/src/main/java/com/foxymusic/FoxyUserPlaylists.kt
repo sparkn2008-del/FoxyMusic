@@ -63,6 +63,55 @@ object FoxyUserPlaylists {
         saveLocked()
     }
 
+    @Synchronized
+    fun moveSong(playlistId: String, fromIndex: Int, toIndex: Int) {
+        val idx = playlists.indexOfFirst { it.id == playlistId }
+        if (idx < 0) return
+        val cur = playlists[idx]
+        if (cur.songs.size < 2 || fromIndex !in cur.songs.indices) return
+        val target = toIndex.coerceIn(0, cur.songs.lastIndex)
+        if (fromIndex == target) return
+        val next = cur.songs.toMutableList()
+        val moved = next.removeAt(fromIndex)
+        next.add(target, moved)
+        playlists[idx] = cur.copy(songs = next)
+        saveLocked()
+    }
+
+    @Synchronized
+    fun snapshotJson(): JSONArray {
+        val arr = JSONArray()
+        for (p in playlists) {
+            val o = JSONObject()
+            o.put("id", p.id)
+            o.put("name", p.name)
+            val songs = JSONArray()
+            for (s in p.songs) songs.put(songToJson(s))
+            o.put("songs", songs)
+            arr.put(o)
+        }
+        return arr
+    }
+
+    @Synchronized
+    fun restoreFromJson(root: JSONArray) {
+        playlists.clear()
+        for (i in 0 until root.length()) {
+            val o = root.optJSONObject(i) ?: continue
+            val id = o.optString("id").ifBlank { UUID.randomUUID().toString() }
+            val name = o.optString("name").ifBlank { "Playlist" }
+            val songsJson = o.optJSONArray("songs") ?: JSONArray()
+            val songs = mutableListOf<Song>()
+            for (j in 0 until songsJson.length()) {
+                val sm = songsJson.optJSONObject(j) ?: continue
+                val song = songFromPlaylistJson(sm) ?: continue
+                songs.add(song)
+            }
+            playlists.add(UserPlaylist(id = id, name = name, songs = songs.distinctBy { it.videoId }))
+        }
+        saveLocked()
+    }
+
     private fun file(): File {
         val dir = context!!.filesDir
         if (!dir.exists()) dir.mkdirs()
@@ -94,18 +143,8 @@ object FoxyUserPlaylists {
     }
 
     private fun saveLocked() {
-        val ctx = context ?: return
-        val arr = JSONArray()
-        for (p in playlists) {
-            val o = JSONObject()
-            o.put("id", p.id)
-            o.put("name", p.name)
-            val songs = JSONArray()
-            for (s in p.songs) songs.put(songToJson(s))
-            o.put("songs", songs)
-            arr.put(o)
-        }
-        runCatching { file().writeText(arr.toString()) }
+        context ?: return
+        runCatching { file().writeText(snapshotJson().toString()) }
     }
 
     private fun songToJson(s: Song): JSONObject = JSONObject().apply {

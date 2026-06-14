@@ -15,32 +15,73 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Persists offline artwork, lyrics, and sidecar metadata next to downloaded audio files.
+ * Persists offline artwork, synced lyrics, and sidecar metadata next to downloaded audio.
+ *
+ * Each track gets:
+ * - `{videoId}.foxy-meta.json` — title, artist, album, duration, thumbnails, paths, flags
+ * - `{videoId}.art.jpg` — cached cover art
+ * - `{videoId}.lyrics.json` — synced lyrics (LRCLIB / YouTube)
  */
 object FoxyOfflineBundle {
     private const val TAG = "FoxyOfflineBundle"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder().retryOnConnectionFailure(true).build()
 
-    private fun downloadsDir(context: Context) =
-        File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+    private fun downloadsDir(context: Context) = FoxyDownloadsPaths.dir(context)
 
-    fun artFile(context: Context, videoId: String) =
-        File(downloadsDir(context), "$videoId.art.jpg")
+    fun artFile(context: Context, videoId: String) = FoxyDownloadsPaths.artFile(context, videoId)
 
-    fun lyricsFile(context: Context, videoId: String) =
-        File(downloadsDir(context), "$videoId.lyrics.json")
+    fun lyricsFile(context: Context, videoId: String) = FoxyDownloadsPaths.lyricsFile(context, videoId)
 
-    fun metaFile(context: Context, videoId: String) =
-        File(downloadsDir(context), "$videoId.foxy-meta.json")
+    fun metaFile(context: Context, videoId: String) = FoxyDownloadsPaths.metaFile(context, videoId)
+
+    /** Write metadata as soon as a download is queued (before bytes finish). */
+    /** JSON embedded in Media3 [DownloadRequest] data for HLS completion recovery. */
+    fun songToDownloadPayload(song: Song): JSONObject = JSONObject().apply {
+        put("videoId", song.videoId)
+        put("title", song.title)
+        put("artist", song.artist)
+        put("thumbnail", song.thumbnail)
+        put("artworkUrl", song.artworkUrl ?: "")
+        put("duration", song.duration ?: "")
+        put("album", song.album ?: "")
+        put("playlistId", song.playlistId ?: "")
+        put("genre", song.genre ?: "")
+        if (song.year != null) put("year", song.year)
+    }
+
+    fun prepareDownloadMeta(context: Context, song: Song) {
+        val app = context.applicationContext
+        writeSongMeta(
+            context = app,
+            song = song,
+            localPath = null,
+            hlsOffline = false,
+            streamUrl = null,
+            downloadPending = true,
+        )
+    }
 
     /** After a progressive file download succeeds. */
     fun onProgressiveDownloadComplete(context: Context, song: Song, mediaFile: File) {
         val app = context.applicationContext
-        writeMeta(app, song, mediaFile.absolutePath, hlsOffline = false, streamUrl = null)
+        val enriched = song.copy(
+            localPath = mediaFile.absolutePath,
+            isDownloaded = true,
+            fileSize = mediaFile.length(),
+        )
+        writeSongMeta(
+            context = app,
+            song = enriched,
+            localPath = mediaFile.absolutePath,
+            hlsOffline = false,
+            streamUrl = null,
+            downloadPending = false,
+            fileSizeBytes = mediaFile.length(),
+        )
         scope.launch {
-            persistArtwork(app, song)
-            persistLyrics(app, song)
+            persistArtwork(app, enriched)
+            persistLyrics(app, enriched)
             refreshLibraryAfterBundle(app)
         }
     }
@@ -48,9 +89,20 @@ object FoxyOfflineBundle {
     /** After Media3 finishes an HLS offline download. */
     fun onHlsDownloadComplete(context: Context, song: Song, streamUrl: String) {
         val app = context.applicationContext
-        val updated = song.copy(isDownloaded = true, streamUrl = streamUrl, localPath = null)
+        val updated = song.copy(
+            isDownloaded = true,
+            streamUrl = streamUrl,
+            localPath = null,
+        )
+        writeSongMeta(
+            context = app,
+            song = updated,
+            localPath = null,
+            hlsOffline = true,
+            streamUrl = streamUrl,
+            downloadPending = false,
+        )
         FoxyLibraryStore.markAsDownloaded(updated, localPath = null)
-        writeMeta(app, updated, localPath = null, hlsOffline = true, streamUrl = streamUrl)
         scope.launch {
             persistArtwork(app, updated)
             persistLyrics(app, updated)
@@ -73,11 +125,9 @@ object FoxyOfflineBundle {
         }
         val vid = song.videoId.trim()
         if (vid.isBlank()) return null
-        val dir = downloadsDir(context)
-        val exts = setOf("webm", "mp4", "m4a", "opus", "mp3", "media", "mkv", "aac", "ogg")
-        dir.listFiles()?.firstOrNull { f ->
-            f.isFile && f.nameWithoutExtension == vid && f.extension.lowercase() in exts && f.length() > 0L
-        }?.let { return android.net.Uri.fromFile(it).toString() }
+        FoxyDownloadsPaths.findMediaFile(context, vid)?.let {
+            return android.net.Uri.fromFile(it).toString()
+        }
 
         val meta = readMeta(context, vid) ?: return null
         if (meta.optBoolean("hlsOffline", false)) {
@@ -115,14 +165,26 @@ object FoxyOfflineBundle {
         }
     }
 
-    private fun writeMeta(
+    /**
+     * Full sidecar metadata for a downloaded track. Merges with any existing file so async
+     * artwork/lyrics updates are not lost.
+     */
+    fun writeSongMeta(
         context: Context,
         song: Song,
-        localPath: String?,
-        hlsOffline: Boolean,
-        streamUrl: String?,
+        localPath: String? = null,
+        hlsOffline: Boolean = false,
+        streamUrl: String? = null,
+        downloadPending: Boolean = false,
+        fileSizeBytes: Long? = null,
     ) {
         try {
+            val existing = readMeta(context, song.videoId)
+            val art = artFile(context, song.videoId)
+            val lyrics = lyricsFile(context, song.videoId)
+            val resolvedLocal = localPath?.takeIf { it.isNotBlank() }
+                ?: song.localPath?.takeIf { it.isNotBlank() }
+                ?: existing?.optString("localPath")?.takeIf { it.isNotBlank() }
             val json = JSONObject().apply {
                 put("videoId", song.videoId)
                 put("title", song.title)
@@ -131,16 +193,80 @@ object FoxyOfflineBundle {
                 put("artworkUrl", song.artworkUrl ?: "")
                 put("duration", song.duration ?: "")
                 put("album", song.album ?: "")
-                put("localPath", localPath ?: "")
+                put("playlistId", song.playlistId ?: "")
+                put("genre", song.genre ?: "")
+                if (song.year != null) put("year", song.year) else remove("year")
+                put("localPath", resolvedLocal ?: "")
                 put("hlsOffline", hlsOffline)
-                put("streamUrl", streamUrl ?: "")
-                val art = artFile(context, song.videoId)
-                if (art.isFile) put("localArtPath", art.absolutePath)
+                put("streamUrl", streamUrl?.takeIf { it.isNotBlank() } ?: song.streamUrl ?: "")
+                put("downloadPending", downloadPending)
+                put("isDownloaded", !downloadPending)
+                val size = fileSizeBytes ?: song.fileSize
+                if (size != null && size > 0L) put("fileSizeBytes", size)
+                if (song.bitrate != null) put("bitrate", song.bitrate)
+                song.lyrics?.takeIf { it.isNotBlank() }?.let { put("lyricsPlain", it) }
+                if (art.isFile && art.length() > 0L) put("localArtPath", art.absolutePath)
+                if (lyrics.isFile && lyrics.length() > 0L) {
+                    put("lyricsCached", true)
+                    put("lyricsPath", lyrics.absolutePath)
+                } else {
+                    put("lyricsCached", existing?.optBoolean("lyricsCached") == true)
+                    existing?.optString("lyricsPath")?.takeIf { it.isNotBlank() }?.let { put("lyricsPath", it) }
+                }
+                val downloadedAt = existing?.optLong("downloadedAt", 0L)?.takeIf { it > 0L }
+                    ?: System.currentTimeMillis()
+                put("downloadedAt", downloadedAt)
+                if (!downloadPending && resolvedLocal.isNullOrBlank() && !hlsOffline) {
+                    put("completedAt", System.currentTimeMillis())
+                } else if (!downloadPending) {
+                    put("completedAt", System.currentTimeMillis())
+                }
             }
-            metaFile(context, song.videoId).writeText(json.toString())
+            metaFile(context, song.videoId).writeText(json.toString(2))
         } catch (e: Exception) {
-            Log.w(TAG, "writeMeta failed: ${e.message}")
+            Log.w(TAG, "writeSongMeta failed: ${e.message}")
         }
+    }
+
+    /** Build a [Song] from stored sidecar metadata (library scan / playback). */
+    fun songFromStoredMeta(
+        context: Context,
+        videoId: String,
+        localPathOverride: String? = null,
+    ): Song? {
+        val json = readMeta(context, videoId) ?: return null
+        return songFromMetaJson(context, json, localPathOverride)
+    }
+
+    fun songFromMetaJson(
+        context: Context,
+        json: JSONObject,
+        localPathOverride: String? = null,
+    ): Song {
+        val videoId = json.optString("videoId").ifBlank { "" }
+        val diskArt = offlineArtworkPath(context, videoId)
+            ?: json.optString("localArtPath").takeIf { it.isNotBlank() }
+        val path = localPathOverride?.takeIf { it.isNotBlank() }
+            ?: json.optString("localPath").takeIf { it.isNotBlank() }
+        val year = json.optInt("year", 0).takeIf { it > 0 }
+        return Song(
+            videoId = videoId,
+            title = json.optString("title").ifBlank { "Offline track" },
+            artist = json.optString("artist").ifBlank { "Unknown artist" },
+            thumbnail = diskArt ?: json.optString("thumbnail"),
+            duration = json.optString("duration").takeIf { it.isNotBlank() },
+            album = json.optString("album").takeIf { it.isNotBlank() },
+            playlistId = json.optString("playlistId").takeIf { it.isNotBlank() },
+            localPath = path,
+            streamUrl = json.optString("streamUrl").takeIf { it.isNotBlank() },
+            isDownloaded = json.optBoolean("isDownloaded", true) && !json.optBoolean("downloadPending"),
+            fileSize = json.optLong("fileSizeBytes", 0L).takeIf { it > 0L },
+            bitrate = json.optInt("bitrate", 0).takeIf { it > 0 },
+            artworkUrl = diskArt ?: json.optString("artworkUrl").takeIf { it.isNotBlank() },
+            lyrics = json.optString("lyricsPlain").takeIf { it.isNotBlank() },
+            genre = json.optString("genre").takeIf { it.isNotBlank() },
+            year = year,
+        )
     }
 
     fun readMeta(context: Context, videoId: String): JSONObject? {
@@ -185,11 +311,15 @@ object FoxyOfflineBundle {
                             return@use
                         }
                         out.writeBytes(bytes)
-                        val meta = readMeta(context, song.videoId)
-                        if (meta != null) {
-                            meta.put("localArtPath", out.absolutePath)
-                            metaFile(context, song.videoId).writeText(meta.toString())
-                        }
+                        writeSongMeta(
+                            context = context,
+                            song = song,
+                            localPath = song.localPath,
+                            hlsOffline = readMeta(context, song.videoId)?.optBoolean("hlsOffline") == true,
+                            streamUrl = readMeta(context, song.videoId)?.optString("streamUrl"),
+                            downloadPending = false,
+                            fileSizeBytes = song.fileSize,
+                        )
                         return@withContext
                     }
                 } catch (e: Exception) {
@@ -213,12 +343,16 @@ object FoxyOfflineBundle {
                         },
                     )
                 }
-                lyricsFile(context, song.videoId).writeText(arr.toString())
-                val meta = readMeta(context, song.videoId)
-                if (meta != null) {
-                    meta.put("lyricsCached", true)
-                    metaFile(context, song.videoId).writeText(meta.toString())
-                }
+                lyricsFile(context, song.videoId).writeText(arr.toString(2))
+                writeSongMeta(
+                    context = context,
+                    song = song,
+                    localPath = song.localPath,
+                    hlsOffline = readMeta(context, song.videoId)?.optBoolean("hlsOffline") == true,
+                    streamUrl = readMeta(context, song.videoId)?.optString("streamUrl"),
+                    downloadPending = false,
+                    fileSizeBytes = song.fileSize,
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "persistLyrics ${song.videoId}: ${e.message}")
             }

@@ -1,8 +1,8 @@
 # FoxyMusic — documentation
 
-The main project README for GitHub is **[../README.md](../README.md)** (features, downloads, build commands).
+The main project README for GitHub is **[../README.md](../README.md)** — features, download badges, FAQ, and build commands in a Metrolist-style layout.
 
-This file adds extra detail for contributors and agents.
+This file adds contributor-focused detail.
 
 ---
 
@@ -10,8 +10,11 @@ This file adds extra detail for contributors and agents.
 
 FoxyMusic is an **Android** hybrid:
 
-- **Kotlin** — Media3 playback, queue, downloads, account helpers, `FoxyGithubUpdate`, notifications
-- **Flutter** — Home, search, library, now playing, lyrics, queue sheet, settings (`lib/main.dart`)
+| Layer | Technology | Responsibility |
+|-------|------------|----------------|
+| UI | Flutter (`lib/`) | Home, search, library, player, settings |
+| Core | Kotlin | Media3, queue, downloads, bridge, updater |
+| API | Kotlin | YouTube Music browse/search/stream |
 
 The repo root is both the **Gradle Android project** and the **Flutter module** (`pubspec.yaml`, `lib/`, `.android/`).
 
@@ -26,11 +29,22 @@ The repo root is both the **Gradle Android project** and the **Flutter module** 
 
 Implementation: `FoxyFlutterChannels.kt`, `FoxyFlutterBridge.kt`.
 
-Notable methods: `getPlayerState`, `getAppearance`, `setAppearance`, `checkGitHubRelease`, `getAppVersion`, `openExternalUrl`.
+Notable methods: `getPlayerState`, `getAppearance`, `setAppearance`, `playQueue`, `checkGitHubRelease`, `getAppVersion`, `openExternalUrl`, recognition APIs.
 
-Notable events: `playerState`, `appearanceChanged`, `updateAvailable`, `libraryFeedChanged`.
+Notable events: `playerState`, `appearanceChanged`, `updateAvailable`, `libraryFeedChanged`, `recognitionResult`.
 
-Full list → **`FOXYMUSIC_INSTRUCTIONS.txt`**.
+**Full contract** → **[FOXYMUSIC_INSTRUCTIONS.txt](../FOXYMUSIC_INSTRUCTIONS.txt)**
+
+---
+
+## Key Dart files
+
+| File | Role |
+|------|------|
+| `lib/main.dart` | Primary UI shell |
+| `lib/now_playing_footer.dart` | Alternate player footer |
+| `lib/now_playing_surfaces.dart` | Full lyrics list |
+| `lib/foxy_startup_splash.dart` | Animated splash |
 
 ---
 
@@ -52,7 +66,7 @@ APKs: `app\build\outputs\apk\release\` (per-ABI splits).
 
 ---
 
-## Other docs
+## Related docs
 
 | File | Contents |
 |------|----------|

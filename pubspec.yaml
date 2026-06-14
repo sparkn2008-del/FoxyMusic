@@ -15,7 +15,7 @@ description: "A new Flutter module project."
 # This version is used _only_ for the Runner app, which is used if you just do
 # a `flutter run`. It has no impact on any other native host app that you embed
 # your Flutter project into.
-version: 1.0.0+3
+version: 1.3.0+7
 
 environment:
   sdk: ^3.11.5
@@ -27,6 +27,7 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  video_player: ^2.9.5
 
 dev_dependencies:
   flutter_test:
@@ -44,7 +45,10 @@ flutter:
 
   assets:
     - assets/images/foxy_home_bg.png
+    - assets/images/app_art.png
     - assets/images/foxy_logo.png
+    - assets/images/foxy_splash.png
+    - assets/images/splash/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

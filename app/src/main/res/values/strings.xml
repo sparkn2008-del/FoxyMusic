@@ -5,5 +5,17 @@
     <string name="downloads_channel_description">Offline downloads</string>
     <string name="playback_channel_name">Now playing</string>
     <string name="playback_channel_description">Playback controls and current track</string>
+    <string name="playback_foreground_placeholder">Preparing playback…</string>
+    <string name="playback_buffering">Buffering…</string>
+    <string name="playback_notification_app">FoxyMusic</string>
+    <string name="download_progress_indeterminate">Downloading…</string>
+    <string name="download_progress_percent">%1$d%% complete</string>
+    <string name="direct_download_channel_name">Song downloads</string>
+    <string name="direct_download_channel_description">Progress for offline file downloads</string>
+    <string name="direct_download_title">Downloading · %1$s</string>
+    <string name="ytm_login_toolbar_title">Connect YouTube Music</string>
+    <string name="ytm_login_status_waiting">Sign in on this page. When finished, tap Save session.</string>
+    <string name="ytm_login_status_ready">Signed in — you can save the session for FoxyMusic.</string>
+    <string name="ytm_login_save">Save session</string>
 </resources>
 

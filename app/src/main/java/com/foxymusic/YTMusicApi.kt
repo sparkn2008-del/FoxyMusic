@@ -1,5 +1,6 @@
 package com.foxymusic
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
@@ -25,8 +26,16 @@ data class AccountInfo(
     val avatarUrl: String
 )
 
+data class ArtistProfileResult(
+    val name: String,
+    val browseId: String,
+    val thumbnail: String,
+    val subscribers: String? = null
+)
+
 object YTMusicApi {
 
+    private const val TAG = "YTMusicApi"
     private const val apiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
     private const val baseUrl = "https://music.youtube.com/youtubei/v1"
 
@@ -35,15 +44,22 @@ object YTMusicApi {
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
-    private val headers = Headers.Builder()
-        .add("Accept", "application/json")
-        .add("Content-Type", "application/json")
-        .add("Origin", "https://music.youtube.com")
-        .add("Referer", "https://music.youtube.com/")
-        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-        .add("X-YouTube-Client-Name", "67")
-        .add("X-YouTube-Client-Version", "1.20250401.01.00")
-        .build()
+    private fun requestHeaders(): Headers {
+        val builder = Headers.Builder()
+            .add("Accept", "application/json")
+            .add("Content-Type", "application/json")
+            .add("Origin", "https://music.youtube.com")
+            .add("Referer", "https://music.youtube.com/")
+            .add("User-Agent", StreamExtractor.STREAM_USER_AGENT)
+            .add("X-YouTube-Client-Name", "67")
+            .add("X-YouTube-Client-Version", "1.20250401.01.00")
+        val cookie = FoxyAccount.state.value.cookie.trim()
+        if (cookie.isNotBlank()) {
+            builder.add("Cookie", cookie)
+            FoxyAccount.state.value.cookie.sapisidHashHeader()?.let { builder.add("Authorization", it) }
+        }
+        return builder.build()
+    }
 
     private const val filterSongs = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
     private const val filterVideos = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"
@@ -52,10 +68,11 @@ object YTMusicApi {
 
     // ====================== PUBLIC API ======================
 
-    suspend fun homeRecommendations(): List<RecommendationSection> {
+    suspend fun homeRecommendations(params: String? = null): List<RecommendationSection> {
         val json = post("browse", JSONObject().apply {
             put("context", clientContext())
             put("browseId", "FEmusic_home")
+            params?.takeIf { it.isNotBlank() }?.let { put("params", it) }
         }) ?: return fallbackSections()
 
         return parseSections(json).ifEmpty { fallbackSections() }
@@ -116,7 +133,8 @@ object YTMusicApi {
         return search(query).take(40)
     }
 
-    suspend fun videos(query: String): List<Song> = search(query, filterVideos)
+    suspend fun videos(query: String): List<Song> =
+        search(query, filterVideos)
 
     /** SimpMusic-style categorized search (songs / videos / albums / artists). */
     suspend fun searchAll(query: String, limitPerCategory: Int = 28): Map<String, List<Song>> {
@@ -137,60 +155,248 @@ object YTMusicApi {
         )
     }
 
-    /**
-     * YouTube Music–style station: prefer **genre / mood** discovery over the literal
-     * `"title artist radio"` search (which floods the queue with the same upload under many names).
-     * Uses [next] for official “up next” suggestions, but filters near-duplicate titles and blends
-     * broad station queries (phonk, slowed, artist radio, etc.).
-     */
-    suspend fun radio(seed: Song): List<Song> {
-        val out = LinkedHashMap<String, Song>()
-        fun put(s: Song) {
-            if (s.videoId == seed.videoId) return
-            if (isLikelySameTrackDifferentUpload(s, seed)) return
-            out.putIfAbsent(s.videoId, s)
-        }
+    /** Artist rows use browse/channel ids, not video ids, so parse them separately. */
+    suspend fun searchArtistProfiles(query: String, limit: Int = 12): List<ArtistProfileResult> {
+        if (query.isBlank()) return emptyList()
+        val json = post("search", JSONObject().apply {
+            put("context", clientContext())
+            put("query", query)
+            put("params", filterArtists)
+        }) ?: return emptyList()
 
-        // 1) Broad station searches first so the queue is not 40× the same keyword hit.
-        for (q in stationSearchQueries(seed)) {
-            if (out.size >= 56) break
-            search(q).forEach(::put)
-        }
-
-        // 2) Innertube “next” panel — often good, but can be remix-heavy; filter + merge.
-        next(seed.videoId).forEach(::put)
-
-        // 3) Last-resort: artist-scoped radio (still not the literal full title string).
-        if (out.size < 14) {
-            val a = seed.artist.substringBefore("feat.").substringBefore("ft.").trim()
-            if (a.isNotBlank() &&
-                !a.equals("YouTube Music", ignoreCase = true) &&
-                !a.equals("Unknown artist", ignoreCase = true)
-            ) {
-                search("$a music mix").forEach(::put)
+        val out = LinkedHashMap<String, ArtistProfileResult>()
+        walkObjects(json) { obj ->
+            val renderer = obj.optJSONObject("musicResponsiveListItemRenderer")
+                ?: obj.optJSONObject("musicTwoRowItemRenderer")
+                ?: return@walkObjects
+            val profile = parseArtistProfileRenderer(renderer) ?: return@walkObjects
+            val key = profile.browseId.ifBlank { profile.name.lowercase(Locale.US) }
+            if (key.isNotBlank() && !out.containsKey(key)) {
+                out[key] = profile
             }
         }
-
-        return out.values.take(50)
+        return out.values.take(limit.coerceIn(1, 24))
     }
 
+    /**
+     * Foxy-style radio: Innertube `next` with `RDAMVM{videoId}` + continuation pages.
+     * Returns the first page only (for callers that do not paginate).
+     */
+    suspend fun radio(seed: Song): List<Song> =
+        fetchRadioPage(seed, null).second
+
+    /**
+     * Loads the next slice of the official YT Music radio queue for [seed].
+     * Reuses [session] when continuing; creates a new [YtmRadioSession] when null.
+     */
+    suspend fun fetchRadioPage(
+        seed: Song,
+        session: YtmRadioSession?,
+    ): Pair<YtmRadioSession, List<Song>> {
+        var state = session?.takeIf { it.seedVideoId == seed.videoId }
+            ?: YtmRadioSession.forSeed(seed.videoId)
+
+        if (state.exhausted && state.continuation == null) return state to emptyList()
+
+        val isFirstPage = state.continuation == null
+        var parsed = requestNextRadioPage(
+            videoId = state.watchVideoId,
+            playlistId = state.playlistId,
+            continuation = state.continuation,
+            loadAutomix = isFirstPage,
+        )
+
+        state.watchVideoId = parsed.watchVideoId.ifBlank { state.watchVideoId }
+        state.playlistId = parsed.watchPlaylistId ?: state.playlistId
+
+        var songs = filterRadioCandidates(parsed.songs, seed)
+
+        // Foxy: empty RDAMVM → retry with video id only (no playlist id).
+        if (isFirstPage && songs.size <= 1 && state.playlistId?.startsWith("RDAMVM") == true) {
+            state.playlistId = null
+            parsed = requestNextRadioPage(
+                videoId = state.seedVideoId,
+                playlistId = null,
+                continuation = null,
+                loadAutomix = true,
+            )
+            state.watchVideoId = parsed.watchVideoId.ifBlank { state.seedVideoId }
+            state.playlistId = parsed.watchPlaylistId
+            songs = filterRadioCandidates(parsed.songs, seed)
+        }
+
+        val relatedId = parsed.relatedBrowseId ?: state.relatedBrowseId
+        val relatedParams = parsed.relatedBrowseParams ?: state.relatedBrowseParams
+        if (relatedId != null) {
+            state.relatedBrowseId = relatedId
+            state.relatedBrowseParams = relatedParams
+        }
+
+        if (isFirstPage && songs.size <= 3 && relatedId != null) {
+            val relatedSongs = filterRadioCandidates(related(relatedId, relatedParams), seed)
+            songs = (songs + relatedSongs).distinctBy { it.videoId }
+        }
+
+        state.continuation = parsed.continuation
+        state.exhausted = parsed.continuation.isNullOrBlank()
+
+        if (songs.isEmpty() && isFirstPage) {
+            songs = legacySearchRadioFallback(seed)
+        }
+
+        if (isFirstPage) {
+            val panelIndex = parsed.currentIndex.coerceIn(0, songs.lastIndex.coerceAtLeast(0))
+            state.queueStartIndex = songs.indexOfFirst { it.videoId == seed.videoId }
+                .takeIf { it >= 0 } ?: panelIndex.coerceIn(0, songs.lastIndex.coerceAtLeast(0))
+        }
+
+        return state to songs
+    }
+
+    /** Keep the seed in panel order; drop dup uploads and non-songs only. */
+    private fun filterRadioCandidates(raw: List<Song>, seed: Song): List<Song> =
+        raw.filter { song ->
+            song.videoId == seed.videoId || !isLikelySameTrackDifferentUpload(song, seed)
+        }
+            .distinctBy { it.videoId }
+            .filter { it.isMusicQueueTrack() }
+
+    /** Simple up-next panel (no RDAMVM playlist) — used for one-off suggestions. */
     suspend fun next(videoId: String): List<Song> {
-        val json = post("next", JSONObject().apply {
+        val page = requestNextRadioPage(videoId, playlistId = null, continuation = null)
+        return page.songs.distinctBy { it.videoId }.filter { it.isMusicQueueTrack() }
+    }
+
+    suspend fun related(browseId: String, params: String? = null): List<Song> {
+        if (browseId.isBlank()) return emptyList()
+        val json = post("browse", JSONObject().apply {
+            put("context", clientContext())
+            put("browseId", browseId)
+            params?.takeIf { it.isNotBlank() }?.let { put("params", it) }
+        }) ?: return emptyList()
+        return parseSongs(json).distinctBy { it.videoId }.filter { it.isMusicQueueTrack() }
+    }
+
+    private suspend fun requestNextRadioPage(
+        videoId: String,
+        playlistId: String?,
+        continuation: String?,
+        loadAutomix: Boolean = false,
+    ): YtmNextRadioPage {
+        val body = JSONObject().apply {
             put("context", clientContext())
             put("enablePersistentPlaylistPanel", true)
             put("isAudioOnly", true)
             put("tunerSettingValue", "AUTOMIX_SETTING_NORMAL")
-            put("watchEndpoint", JSONObject().put("videoId", videoId))
-        }) ?: return emptyList()
+            continuation?.takeIf { it.isNotBlank() }?.let { put("continuation", it) }
+            put(
+                "watchEndpoint",
+                JSONObject().apply {
+                    put("videoId", videoId)
+                    playlistId?.takeIf { it.isNotBlank() }?.let { put("playlistId", it) }
+                },
+            )
+        }
+        val json = post("next", body) ?: return YtmNextRadioPage(emptyList(), null, null, null, videoId, playlistId)
+        var parsed = YtmQueueParser.parseNextResponse(json, videoId, playlistId)
 
-        return parseSongs(json).distinctBy { it.videoId }
+        // Foxy: merge automix playlist tracks after the official radio panel queue.
+        if (loadAutomix && continuation.isNullOrBlank() && !parsed.automixPlaylistId.isNullOrBlank()) {
+            val automixId = parsed.automixPlaylistId!!
+            val automixPage = requestNextRadioPage(
+                videoId = parsed.watchVideoId,
+                playlistId = automixId,
+                continuation = null,
+                loadAutomix = false,
+            )
+            parsed = parsed.copy(
+                songs = (parsed.songs + automixPage.songs).distinctBy { it.videoId },
+                watchPlaylistId = automixPage.watchPlaylistId ?: automixId,
+                continuation = automixPage.continuation ?: parsed.continuation,
+                relatedBrowseId = automixPage.relatedBrowseId ?: parsed.relatedBrowseId,
+                relatedBrowseParams = automixPage.relatedBrowseParams ?: parsed.relatedBrowseParams,
+            )
+        }
+
+        if (parsed.songs.isEmpty()) {
+            val fallback = parseSongs(json).distinctBy { it.videoId }
+            if (fallback.isNotEmpty()) {
+                parsed = parsed.copy(songs = fallback)
+            }
+        }
+
+        return YtmNextRadioPage(
+            songs = parsed.songs,
+            continuation = parsed.continuation,
+            relatedBrowseId = parsed.relatedBrowseId,
+            relatedBrowseParams = parsed.relatedBrowseParams,
+            watchVideoId = parsed.watchVideoId,
+            watchPlaylistId = parsed.watchPlaylistId,
+            currentIndex = parsed.currentIndex,
+        )
+    }
+
+    private suspend fun legacySearchRadioFallback(seed: Song): List<Song> {
+        val out = LinkedHashMap<String, Song>()
+        fun put(s: Song) {
+            if (s.videoId == seed.videoId) return
+            if (!s.isMusicQueueTrack()) return
+            if (isLikelySameTrackDifferentUpload(s, seed)) return
+            out.putIfAbsent(s.videoId, s)
+        }
+        for (q in stationSearchQueries(seed).take(3)) {
+            if (out.size >= 24) break
+            search(q).forEach(::put)
+        }
+        return out.values.toList()
+    }
+
+    private fun findNextContinuation(root: JSONObject): String? {
+        var found: String? = null
+        walkObjects(root) { obj ->
+            if (found != null) return@walkObjects
+            obj.optJSONArray("continuations")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)
+                        ?.optJSONObject("nextContinuationData")
+                        ?.optString("continuation")
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let {
+                            found = it
+                            return@walkObjects
+                        }
+                }
+            }
+        }
+        return found
+    }
+
+    private fun findRelatedBrowseEndpoint(root: JSONObject): Pair<String?, String?> {
+        var browseId: String? = null
+        var params: String? = null
+        walkObjects(root) { obj ->
+            if (browseId != null) return@walkObjects
+            val tabs = obj.optJSONObject("watchNextTabbedResultsRenderer")?.optJSONArray("tabs")
+                ?: obj.optJSONObject("tabbedRenderer")
+                    ?.optJSONObject("watchNextTabbedResultsRenderer")
+                    ?.optJSONArray("tabs")
+            if (tabs == null || tabs.length() < 3) return@walkObjects
+            val endpoint = tabs.optJSONObject(2)
+                ?.optJSONObject("tabRenderer")
+                ?.optJSONObject("endpoint")
+                ?.optJSONObject("browseEndpoint")
+            val id = endpoint?.optString("browseId")?.takeIf { it.isNotBlank() } ?: return@walkObjects
+            browseId = id
+            params = endpoint.optString("params").takeIf { it.isNotBlank() }
+        }
+        return browseId to params
     }
 
     suspend fun lyrics(videoId: String): String? = withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder()
                 .url("https://video.google.com/timedtext?fmt=srv3&lang=en&v=$videoId")
-                .headers(headers)
+                .headers(requestHeaders())
                 .get()
                 .build()
 
@@ -227,12 +433,15 @@ object YTMusicApi {
 
             val request = Request.Builder()
                 .url("$baseUrl/$endpoint?key=$apiKey&prettyPrint=false")
-                .headers(headers)
+                .headers(requestHeaders())
                 .post(body)
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "$endpoint HTTP ${response.code}")
+                    return@withContext null
+                }
                 JSONObject(response.body?.string().orEmpty())
             }
         }.getOrNull()
@@ -255,58 +464,188 @@ object YTMusicApi {
                 ?: return@walkObjects
 
             val title = renderer.titleText().ifBlank { "Recommended" }
-            val songs = parseSongs(renderer)
-
-            if (songs.isNotEmpty()) {
-                sections += RecommendationSection(title, songs)
+            val filtered = parseSongs(renderer).distinctBy { it.videoId }
+            if (filtered.isNotEmpty()) {
+                sections += RecommendationSection(title, filtered)
             }
         }
         return sections.distinctBy { it.title }.take(12)
     }
 
+    /** Quick picks when live Innertube browse/search returns nothing. */
+    fun fallbackRecommendationSections(): List<RecommendationSection> = fallbackSections()
+
     private fun parseSongs(root: JSONObject): List<Song> {
         val songs = mutableListOf<Song>()
+        val seen = HashSet<String>()
         walkObjects(root) { obj ->
             val renderer = obj.optJSONObject("musicResponsiveListItemRenderer")
                 ?: obj.optJSONObject("musicTwoRowItemRenderer")
                 ?: obj.optJSONObject("playlistPanelVideoRenderer")
                 ?: return@walkObjects
 
-            val videoId = renderer.findVideoId()
-            if (videoId.isBlank()) return@walkObjects
-
-            val runs = renderer.findTextRuns()
-            val title = runs.firstOrNull { it.isNotBlank() } ?: "Unknown Title"
-            val artist = runs.drop(1).firstOrNull { 
-                it.isNotBlank() && it != title && it != "Song" && it != "Video"
-            } ?: "YouTube Music"
-
-            val thumbnail = renderer.findThumbnail()
-            val playlistId = renderer.findPlaylistId()
-
-            val poster = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
-            songs += Song(
-                videoId = videoId,
-                title = title,
-                artist = artist,
-                thumbnail = thumbnail.ifBlank { poster },
-                album = null,
-                playlistId = playlistId,
-                artworkUrl = poster
-            )
+            val song = parseRendererToSong(renderer) ?: return@walkObjects
+            if (!seen.add(song.videoId)) return@walkObjects
+            songs += song
         }
         return songs
     }
 
+    private fun parseRendererToSong(renderer: JSONObject): Song? {
+        val videoId = renderer.extractVideoId()
+        if (videoId.isBlank()) return null
+
+        val meta = renderer.extractTitleArtistDuration()
+        val title = meta.title
+        val artist = meta.artist
+        if (title.isBlank()) return null
+        if (YtmMusicFilter.isObviouslyNonPlayable(title, artist)) return null
+
+        val thumbnail = renderer.findThumbnail()
+        val playlistId = renderer.findPlaylistId().takeIf {
+            renderer.optJSONObject("navigationEndpoint")?.has("watchPlaylistEndpoint") != true
+        }
+        val poster = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
+        return Song(
+            videoId = videoId,
+            title = title,
+            artist = artist,
+            thumbnail = thumbnail.ifBlank { poster },
+            duration = meta.duration,
+            album = meta.album,
+            playlistId = playlistId,
+            artworkUrl = poster,
+        )
+    }
+
+    private fun parseArtistProfileRenderer(renderer: JSONObject): ArtistProfileResult? {
+        val browseId = renderer.findBrowseId()
+        val thumbnail = renderer.findThumbnail()
+        if (browseId.isBlank() && thumbnail.isBlank()) return null
+
+        val columns = renderer.optJSONArray("flexColumns")
+        val title = columns
+            ?.optJSONObject(0)
+            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+            ?.optJSONObject("text")
+            ?.runsText()
+            ?.trim()
+            .orEmpty()
+            .ifBlank {
+                renderer.optJSONObject("title")?.runsText()?.trim().orEmpty()
+            }
+            .ifBlank {
+                renderer.findTextRuns().firstOrNull {
+                    it.isNotBlank() && it != "Artist" && !YtmMusicFilter.isDurationLike(it)
+                }.orEmpty()
+            }
+        if (title.isBlank()) return null
+
+        val subtitle = renderer.findTextRuns()
+            .drop(1)
+            .firstOrNull {
+                it.isNotBlank() &&
+                    it != title &&
+                    !it.equals("Artist", ignoreCase = true) &&
+                    !YtmMusicFilter.isDurationLike(it)
+            }
+        return ArtistProfileResult(
+            name = title,
+            browseId = browseId,
+            thumbnail = thumbnail,
+            subscribers = subtitle,
+        )
+    }
+
+    private data class ItemMeta(
+        val title: String,
+        val artist: String,
+        val duration: String?,
+        val album: String?,
+    )
+
+    private fun JSONObject.extractVideoId(): String {
+        optJSONObject("playlistItemData")?.optString("videoId")?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        return findVideoId().trim()
+    }
+
+    private fun JSONObject.extractTitleArtistDuration(): ItemMeta {
+        optJSONArray("flexColumns")?.let { columns ->
+            if (columns.length() > 0) {
+                val title = columns.optJSONObject(0)
+                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                    ?.optJSONObject("text")
+                    ?.runsText()
+                    ?.trim()
+                    .orEmpty()
+                val subtitleRuns = columns.optJSONObject(1)
+                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                    ?.optJSONObject("text")
+                    ?.collectRuns()
+                    .orEmpty()
+                val artist = subtitleRuns.firstOrNull {
+                    it.isNotBlank() && it != " • " && !YtmMusicFilter.isDurationLike(it)
+                } ?: "YouTube Music"
+                val duration = subtitleRuns.firstOrNull { YtmMusicFilter.isDurationLike(it) }
+                val album = subtitleRuns.drop(1).firstOrNull {
+                    it.isNotBlank() && it != " • " && !YtmMusicFilter.isDurationLike(it) && it != artist
+                }
+                if (title.isNotBlank()) {
+                    return ItemMeta(title, artist, duration, album)
+                }
+            }
+        }
+
+        val runs = findTextRuns()
+        val title = runs.firstOrNull { it.isNotBlank() && !YtmMusicFilter.isDurationLike(it) }.orEmpty()
+        val artist = runs.drop(1).firstOrNull {
+            it.isNotBlank() &&
+                it != title &&
+                it != "Song" &&
+                it != "Video" &&
+                it != " • " &&
+                !YtmMusicFilter.isDurationLike(it)
+        } ?: "YouTube Music"
+        return ItemMeta(
+            title = title.ifBlank { "Unknown Title" },
+            artist = artist,
+            duration = findDurationText(),
+            album = null,
+        )
+    }
+
+    private fun JSONObject.collectRuns(): List<String> =
+        optJSONArray("runs")?.let { array ->
+            buildList {
+                for (i in 0 until array.length()) {
+                    array.optJSONObject(i)?.optString("text")
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { add(it) }
+                }
+            }
+        }.orEmpty()
+
+    private fun JSONObject.findDurationText(): String? {
+        listOf("lengthText", "length", "durationText", "formattedDuration").forEach { key ->
+            optJSONObject(key)?.runsText()?.trim()?.takeIf { YtmMusicFilter.isDurationLike(it) }?.let { return it }
+        }
+        findTextRuns().forEach { run ->
+            if (YtmMusicFilter.isDurationLike(run)) return run.trim()
+        }
+        return null
+    }
+
     private fun fallbackSections(): List<RecommendationSection> = listOf(
         RecommendationSection(
-            "Quick picks",
+            "Charting now",
             listOf(
-                Song("jfKfPfyJRdk", "lofi hip hop radio", "Lofi Girl", artworkUrl = "https://img.youtube.com/vi/jfKfPfyJRdk/maxresdefault.jpg"),
-                Song("5qap5aO4i9A", "chill beats", "YouTube Music", artworkUrl = "https://img.youtube.com/vi/5qap5aO4i9A/maxresdefault.jpg"),
-                Song("DWcJFNfaw9c", "focus radio", "YouTube Music", artworkUrl = "https://img.youtube.com/vi/DWcJFNfaw9c/maxresdefault.jpg")
-            )
-        )
+                Song("kPa7bsKwL-c", "Beautiful Things", "Benson Boone", artworkUrl = "https://img.youtube.com/vi/kPa7bsKwL-c/maxresdefault.jpg"),
+                Song("0Hi8BjNTMwE", "Lose Control", "Teddy Swims", artworkUrl = "https://img.youtube.com/vi/0Hi8BjNTMwE/maxresdefault.jpg"),
+                Song("YVkUvmDQ3HY", "Espresso", "Sabrina Carpenter", artworkUrl = "https://img.youtube.com/vi/YVkUvmDQ3HY/maxresdefault.jpg"),
+            ),
+        ),
     )
 
     // ====================== JSON EXTENSIONS ======================
@@ -339,6 +678,17 @@ object YTMusicApi {
             }
         }
         return id.takeIf { it.isNotBlank() }
+    }
+
+    private fun JSONObject.findBrowseId(): String {
+        var best = ""
+        walkObjects(this) { obj ->
+            if (best.isNotBlank()) return@walkObjects
+            val endpoint = obj.optJSONObject("browseEndpoint") ?: return@walkObjects
+            val id = endpoint.optString("browseId").trim()
+            if (id.isNotBlank()) best = id
+        }
+        return best
     }
 
     private fun JSONObject.findThumbnail(): String {
@@ -468,8 +818,10 @@ object YTMusicApi {
             add("$shortArtist mix")
         }
 
-        // Broad tail so the station never collapses to one keyword.
-        add("trending songs mix")
+        val titleKey = normalizeTrackTitleKey(seed.title)
+        if (titleKey.isNotBlank() && q.size < 5) {
+            add("songs like ${seed.title.take(48)}")
+        }
 
         return q
     }

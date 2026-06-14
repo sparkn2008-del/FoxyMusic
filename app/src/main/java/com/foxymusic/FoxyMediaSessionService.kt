@@ -9,10 +9,15 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -37,7 +42,7 @@ import kotlin.math.min
 
 @OptIn(UnstableApi::class)
 /**
- * Media3 session service — rich media-style notification (Metrolist / YT Music–style shade card)
+ * Media3 session service — rich media-style notification (Foxy / YT Music–style shade card)
  * wired to ExoPlayer in [MusicPlayer].
  */
 class FoxyMediaSessionService : MediaSessionService() {
@@ -135,7 +140,7 @@ class FoxyMediaSessionService : MediaSessionService() {
             return START_STICKY
         }
         scheduleNotificationRefresh()
-        return super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -154,7 +159,7 @@ class FoxyMediaSessionService : MediaSessionService() {
      */
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         try {
-            super.onUpdateNotification(session, startInForegroundRequired)
+            promoteToForeground("onUpdateNotification-custom")
         } catch (e: Exception) {
             val isFgPolicy =
                 e is ForegroundServiceStartNotAllowedException ||
@@ -223,6 +228,12 @@ class FoxyMediaSessionService : MediaSessionService() {
             )
         }
 
+        val customView = buildFoxyNotificationView(ui, largeIcon)
+        if (customView != null) {
+            b.setCustomContentView(customView)
+            b.setCustomBigContentView(customView)
+        }
+
         if (ui.durationMs > 500 && !ui.isBuffering) {
             val max = 100
             val prog = ((ui.positionMs.coerceAtLeast(0L) * max) / ui.durationMs.coerceAtLeast(1L))
@@ -238,6 +249,86 @@ class FoxyMediaSessionService : MediaSessionService() {
         }
         return b.build()
     }
+
+    private fun buildFoxyNotificationView(
+        ui: PlayerUiState,
+        artwork: Bitmap?,
+    ): RemoteViews? {
+        val song = ui.currentSong
+        val title = song?.title?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.app_name)
+        val artist = song?.artist?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.playback_foreground_placeholder)
+        val views = runCatching {
+            RemoteViews(packageName, R.layout.notification_foxy_media)
+        }.getOrElse { error ->
+            Log.w(tag, "Custom notification layout unavailable", error)
+            return null
+        }
+        views.setTextViewText(R.id.notif_title, title)
+        views.setTextViewText(R.id.notif_artist, artist)
+        views.setTextViewText(R.id.notif_device, "This phone")
+
+        val playPauseIcon =
+            if (ui.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
+        views.setImageViewResource(R.id.notif_top_play, playPauseIcon)
+        views.setImageViewResource(R.id.notif_play_pause, playPauseIcon)
+        views.setInt(R.id.notif_top_play, "setColorFilter", Color.rgb(48, 43, 58))
+        views.setInt(R.id.notif_play_pause, "setColorFilter", Color.rgb(48, 43, 58))
+
+        views.setOnClickPendingIntent(
+            R.id.notif_top_play,
+            mediaCommandPendingIntent(Player.COMMAND_PLAY_PAUSE),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_play_pause,
+            mediaCommandPendingIntent(Player.COMMAND_PLAY_PAUSE),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_prev,
+            mediaCommandPendingIntent(Player.COMMAND_SEEK_TO_PREVIOUS),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_next,
+            mediaCommandPendingIntent(Player.COMMAND_SEEK_TO_NEXT),
+        )
+
+        if (ui.durationMs > 500 && !ui.isBuffering) {
+            val progress = ((ui.positionMs.coerceAtLeast(0L) * 100) /
+                ui.durationMs.coerceAtLeast(1L)).toInt().coerceIn(0, 100)
+            views.setProgressBar(R.id.notif_progress, 100, progress, false)
+        } else {
+            views.setProgressBar(R.id.notif_progress, 100, 0, ui.isBuffering)
+        }
+
+        artwork?.let { source ->
+            createNotificationBackdrop(source)?.let { backdrop ->
+                views.setImageViewBitmap(R.id.notif_artwork_bg, backdrop)
+            }
+        }
+        return views
+    }
+
+    private fun createNotificationBackdrop(source: Bitmap): Bitmap? = runCatching {
+        val width = 720
+        val height = 368
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val scale = maxOf(width.toFloat() / source.width, height.toFloat() / source.height)
+        val drawWidth = source.width * scale
+        val drawHeight = source.height * scale
+        val left = (width - drawWidth) / 2f
+        val top = (height - drawHeight) / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(
+            source,
+            null,
+            RectF(left, top, left + drawWidth, top + drawHeight),
+            paint,
+        )
+        canvas.drawColor(Color.argb(96, 38, 28, 72))
+        out
+    }.getOrNull()
 
     private fun attachMediaTransportActions(
         builder: NotificationCompat.Builder,
@@ -276,8 +367,12 @@ class FoxyMediaSessionService : MediaSessionService() {
     }
 
     private fun promoteToForeground(reason: String) {
-        val notification = buildFallbackForegroundNotification()
         val nid = DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID
+        val notification = runCatching { buildFallbackForegroundNotification() }
+            .getOrElse { error ->
+                Log.e(tag, "Rich foreground notification failed; using minimal fallback", error)
+                buildMinimalForegroundNotification()
+            }
         ServiceCompat.startForeground(
             this,
             nid,
@@ -288,12 +383,47 @@ class FoxyMediaSessionService : MediaSessionService() {
         maybeEnqueueArtworkForPlaceholder(nid)
     }
 
+    private fun buildMinimalForegroundNotification(): android.app.Notification {
+        val ui = MusicPlayer.state.value
+        val song = ui.currentSong
+        val title = song?.title?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.app_name)
+        val text = song?.artist?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.playback_foreground_placeholder)
+        val builder = NotificationCompat.Builder(this, PLAYBACK_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_stat_foxy_notification)
+            .setOngoing(ui.isPlaying || ui.isBuffering)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+        MusicPlayer.mediaSession?.let { session ->
+            attachMediaTransportActions(builder, session)
+            builder.setStyle(
+                MediaStyleNotificationHelper.MediaStyle(session)
+                    .setShowActionsInCompactView(0, 1, 2),
+            )
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            builder.setForegroundServiceBehavior(android.app.Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+        return builder.build()
+    }
+
     private fun maybeEnqueueArtworkForPlaceholder(notificationId: Int) {
         val song = MusicPlayer.state.value.currentSong ?: return
         artworkScope.launch {
             val bmp = withContext(Dispatchers.IO) { resolveNotificationArtwork(song) } ?: return@launch
             val nm = NotificationManagerCompat.from(this@FoxyMediaSessionService)
-            nm.notify(notificationId, buildFallbackForegroundNotification(bmp))
+            runCatching {
+                nm.notify(notificationId, buildFallbackForegroundNotification(bmp))
+            }.onFailure { error ->
+                Log.w(tag, "Artwork notification update failed", error)
+            }
         }
     }
 
@@ -337,21 +467,20 @@ class FoxyMediaSessionService : MediaSessionService() {
     }.getOrNull()
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        val session = MusicPlayer.mediaSession ?: run {
+        val continueInBackground = FoxySettings.state.value.continuePlaybackWhenDismissed
+        val session = MusicPlayer.mediaSession
+        if (!continueInBackground) {
+            session?.player?.pause()
             stopSelf()
             return
         }
-        val p = session.player
-        // Keep the foreground media service alive while the user expects playback to continue
-        // (including buffering with playWhenReady true).
-        val keepAlive =
-            p.playWhenReady ||
-                p.isPlaying ||
-                p.playbackState == Player.STATE_BUFFERING
-        if (!keepAlive) {
+        if (session == null) {
             stopSelf()
+            return
         }
+        // Stay foreground so OEMs do not kill playback when the task is cleared from recents.
+        runCatching { promoteToForeground("onTaskRemoved") }
+        scheduleNotificationRefresh()
     }
 
     companion object {

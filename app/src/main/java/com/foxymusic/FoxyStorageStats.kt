@@ -7,10 +7,11 @@ object FoxyStorageStats {
 
     fun snapshot(context: Context): Map<String, Any> {
         val app = context.applicationContext
-        val downloadsDir = File(app.getExternalFilesDir(null), "downloads")
+        val downloadsDir = FoxyDownloadsPaths.dir(app)
+        val legacyDownloadsDir = FoxyDownloadsPaths.legacyDir(app)
         val mediaCacheDir = File(app.cacheDir, "media_cache")
         return mapOf(
-            "downloadBytes" to directorySize(downloadsDir),
+            "downloadBytes" to directorySize(downloadsDir) + directorySize(legacyDownloadsDir),
             "cacheBytes" to directorySize(mediaCacheDir)
         )
     }

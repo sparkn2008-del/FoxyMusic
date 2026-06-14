@@ -1,3 +1,13 @@
+v1.3.0 (versionCode 7) - June 2026
+-----------------------------------
+- Flutter-first home: tuned shelf spacing, resume your vibe as horizontal rail
+- Metrolist-style now playing with compact lyrics preview and layout polish
+- Music recognition, recognition history, and mic entry on home
+- Playback stability: live position sync, notification RemoteViews fix, buffering fixes
+- Settings refresh: stream quality / Ultra path, updater toggles, About Us polish
+- New splash frames, app icon, and logo asset wiring (app_art.png)
+- Gradle wrapper, split APK outputs, and project cleanup for open-source release
+
 v1.2.2 (versionCode 6) - 1 June 2026
 -----------------------------------
 - Changed the red black theme to white/black and removed gradient home and fixed most of the Ui 

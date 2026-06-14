@@ -16,8 +16,19 @@ object FoxyPlayerConnection {
 
     fun init(context: Context) = MusicPlayer.init(context)
 
-    fun playQueue(context: Context, songs: List<Song>, startIndex: Int = 0, radioTail: Boolean = false) =
-        MusicPlayer.playQueue(context, songs, startIndex, radioTail)
+    fun playQueue(
+        context: Context,
+        songs: List<Song>,
+        startIndex: Int = 0,
+        radioTail: Boolean = false,
+        offlineQueueOnly: Boolean = false,
+    ) = MusicPlayer.playQueue(context, songs, startIndex, radioTail, offlineQueueOnly)
+
+    fun playWithRadio(context: Context, seed: Song) =
+        FoxyPlayback.playWithRadio(context, seed)
+
+    fun playDiscoveryQueue(context: Context, songs: List<Song>, startIndex: Int = 0) =
+        FoxyPlayback.playQueue(context, songs, startIndex)
 
     fun play(context: Context, song: Song) = MusicPlayer.play(context, song)
     fun play(context: Context, url: String, song: Song) = MusicPlayer.play(context, url, song)
@@ -35,6 +46,8 @@ object FoxyPlayerConnection {
     fun addToQueue(song: Song) = MusicPlayer.addToQueue(song)
     fun enqueuePlayNext(song: Song) = MusicPlayer.enqueuePlayNext(song)
     fun removeFromQueue(song: Song) = MusicPlayer.removeFromQueue(song)
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) =
+        MusicPlayer.moveQueueItem(fromIndex, toIndex)
 
     fun skipToQueueIndex(context: Context, index: Int) =
         MusicPlayer.skipToQueueIndex(context, index)

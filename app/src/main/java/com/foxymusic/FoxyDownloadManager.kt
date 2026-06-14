@@ -36,17 +36,29 @@ object FoxyDownloadManager {
         if (isDownloading(song.videoId)) return
         if (song.isDownloaded && !song.localPath.isNullOrBlank()) return
 
-        val localDir = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+        val localDir = FoxyDownloadsPaths.dir(context)
         val outputPathBase = File(localDir, song.videoId).absolutePath
 
         scope.launch {
             activeDownloads[song.videoId] = true
             lastNotifyPct.remove(song.videoId)
             val appCtx = context.applicationContext
+            FoxyOfflineBundle.prepareDownloadMeta(appCtx, song)
             FoxyActiveDownloadNotifier.ensureChannel(appCtx)
             var outFile: File? = null
             try {
-                val result = withContext(Dispatchers.IO) { StreamExtractor.getStreamResult(song.videoId) }
+                val tier = FoxySettings.state.value.downloadQualityTier
+                val result = withContext(Dispatchers.IO) {
+                    StreamExtractor.getStreamResult(
+                        song.videoId,
+                        tier,
+                        listOf(song.title, song.artist)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() && it != song.videoId }
+                            .distinct()
+                            .joinToString(" ")
+                    )
+                }
                 val url = result.url
                 if (url.isNullOrBlank()) {
                     Log.w(TAG, "No downloadable URL for ${song.videoId}: ${result.error}")
@@ -55,7 +67,6 @@ object FoxyDownloadManager {
                 }
 
                 if (url.contains(".m3u8")) {
-                    // Use Media3 downloader for HLS.
                     FoxyLibraryStore.setDownloadProgress(song.videoId, 0.01f)
                     FoxyMedia3Downloads.addDownload(context, song, url)
                     return@launch
@@ -121,7 +132,8 @@ object FoxyDownloadManager {
                 val finalSong = song.copy(
                     localPath = outFile.absolutePath,
                     isDownloaded = true,
-                    streamUrl = null
+                    streamUrl = null,
+                    bitrate = result.bitrate,
                 )
                 FoxyLibraryStore.markAsDownloaded(finalSong, outFile.absolutePath)
                 FoxyOfflineBundle.onProgressiveDownloadComplete(appCtx, finalSong, outFile)
@@ -148,6 +160,9 @@ object FoxyDownloadManager {
 
     private fun outputExtFromUrl(url: String): String {
         return when {
+            url.contains(".flac", ignoreCase = true) || url.contains("audio%2Fflac", ignoreCase = true) || url.contains("audio/flac", ignoreCase = true) -> ".flac"
+            url.contains(".alac", ignoreCase = true) -> ".m4a"
+            url.contains(".wav", ignoreCase = true) || url.contains("audio%2Fwav", ignoreCase = true) || url.contains("audio/wav", ignoreCase = true) -> ".wav"
             url.contains(".webm", ignoreCase = true) -> ".webm"
             url.contains(".mp4", ignoreCase = true) -> ".mp4"
             url.contains(".m4a", ignoreCase = true) -> ".m4a"

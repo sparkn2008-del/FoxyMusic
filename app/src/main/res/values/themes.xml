@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.FoxyMusic" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
         <item name="colorPrimary">#FFFF6B35</item>
         <item name="colorPrimaryVariant">#FFE84D0E</item>
         <item name="colorOnPrimary">#FFFFFFFF</item>
@@ -12,14 +13,5 @@
         <item name="colorControlHighlight">#33FF6B35</item>
         <item name="android:navigationBarColor">#FF0A0A0A</item>
         <item name="android:statusBarColor">#FF0A0A0A</item>
-        <item name="bottomNavigationStyle">@style/FoxyBottomNav</item>
-    </style>
-
-    <style name="FoxyBottomNav" parent="Widget.MaterialComponents.BottomNavigationView">
-        <item name="android:background">#FF161616</item>
-        <item name="itemIconTint">@drawable/bottom_nav_color</item>
-        <item name="itemTextColor">@drawable/bottom_nav_color</item>
-        <item name="itemRippleColor">#33FF6B35</item>
-        <item name="labelVisibilityMode">labeled</item>
     </style>
 </resources>

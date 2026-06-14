@@ -8,6 +8,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -16,19 +17,29 @@ data class LyricLine(val timeMs: Long, val text: String)
 object LyricsRepository {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .build()
+    private val memoryCache = ConcurrentHashMap<String, List<LyricLine>>()
 
     suspend fun fetchSyncedLines(song: Song): List<LyricLine> = withContext(Dispatchers.IO) {
         val preferLrclib = FoxySettings.state.value.lyricsPreferLrclib
-        if (preferLrclib) {
-            fetchLrclib(song).takeIf { it.isNotEmpty() }
+        val key = "${song.videoId}|${song.title}|${song.artist}|$preferLrclib".lowercase()
+        memoryCache[key]?.let { return@withContext it }
+        val lines = if (preferLrclib) {
+            fetchSimpMusic(song).takeIf { it.isNotEmpty() }
+                ?: fetchLrclib(song).takeIf { it.isNotEmpty() }
                 ?: fetchYoutubeTranscript(song.videoId)
         } else {
             fetchYoutubeTranscript(song.videoId).takeIf { it.isNotEmpty() }
+                ?: fetchSimpMusic(song).takeIf { it.isNotEmpty() }
                 ?: fetchLrclib(song)
         }
+        if (lines.isNotEmpty()) {
+            if (memoryCache.size > 64) memoryCache.clear()
+            memoryCache[key] = lines
+        }
+        lines
     }
 
     private fun fetchLrclib(song: Song): List<LyricLine> = runCatching {
@@ -62,6 +73,37 @@ object LyricsRepository {
         parseSrv3Xml(body)
     }.getOrDefault(emptyList())
 
+    private fun fetchSimpMusic(song: Song): List<LyricLine> = runCatching {
+        val videoId = song.videoId.trim()
+        if (videoId.isBlank()) return@runCatching emptyList()
+        val body = get("https://api-lyrics.simpmusic.org/v1/$videoId")
+            ?: return@runCatching emptyList()
+        val root = JSONObject(body)
+        if (!root.optBoolean("success", false)) return@runCatching emptyList()
+        val data = root.optJSONArray("data") ?: return@runCatching emptyList()
+        val duration = song.parsedDurationSeconds()
+        var bestLines = emptyList<LyricLine>()
+        var bestScore = Int.MAX_VALUE
+        for (i in 0 until data.length()) {
+            val item = data.optJSONObject(i) ?: continue
+            val synced = item.optString("syncedLyrics").trim()
+            if (synced.isBlank()) continue
+            val lines = parseLrc(synced)
+            if (lines.isEmpty()) continue
+            val itemDuration = item.optInt("duration", -1)
+            val score = if (duration != null && itemDuration > 0) {
+                kotlin.math.abs(itemDuration - duration)
+            } else {
+                i
+            }
+            if (score < bestScore) {
+                bestScore = score
+                bestLines = lines
+            }
+        }
+        bestLines
+    }.getOrDefault(emptyList())
+
     private fun get(url: String): String? {
         val httpUrl = url.toHttpUrlOrNull() ?: return null
         val req = Request.Builder().url(httpUrl).get().build()
@@ -78,8 +120,8 @@ object LyricsRepository {
         raw.lineSequence().forEach { line ->
             val m = lrcLine.matcher(line.trim())
             if (!m.matches()) return@forEach
-            val min = m.group(1).toLong()
-            val sec = m.group(2).toLong()
+            val min = m.group(1)?.toLongOrNull() ?: return@forEach
+            val sec = m.group(2)?.toLongOrNull() ?: return@forEach
             val frac = m.group(3)?.let { f ->
                 when (f.length) {
                     2 -> f.toLong() * 10

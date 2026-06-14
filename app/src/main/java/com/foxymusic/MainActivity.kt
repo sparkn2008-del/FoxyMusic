@@ -9,10 +9,14 @@ import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * App entry: full Flutter UI in [lib/main.dart]. Kotlin playback, account, and
@@ -22,6 +26,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var bridge: FoxyFlutterBridge? = null
     private var pendingHomeBgResult: MethodChannel.Result? = null
+    private var pendingLocalAudioResult: MethodChannel.Result? = null
+    private var pendingRecognitionResult: MethodChannel.Result? = null
 
     private val pickHomeBackgroundLauncher =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -55,6 +61,41 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
+    private val importLocalAudioLauncher =
+        registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+            val pending = pendingLocalAudioResult
+            pendingLocalAudioResult = null
+            if (pending == null) return@registerForActivityResult
+            if (uris.isEmpty()) {
+                pending.success(mapOf("ok" to false, "cancelled" to true, "imported" to 0))
+                return@registerForActivityResult
+            }
+            lifecycleScope.launch {
+                val response = withContext(Dispatchers.IO) {
+                    FoxyLocalMusic.importUris(applicationContext, uris)
+                }
+                bridge?.emitLibraryDownloadsChangedEvent()
+                pending.success(response)
+            }
+        }
+
+    private val requestRecordAudioPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val pending = pendingRecognitionResult
+            pendingRecognitionResult = null
+            if (pending == null) return@registerForActivityResult
+            if (granted) {
+                bridge?.startRecognition()
+                pending.success(mapOf("ok" to true))
+            } else {
+                pending.error(
+                    "permission_denied",
+                    "Microphone permission is required for music recognition",
+                    null,
+                )
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
@@ -67,10 +108,14 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         FoxySettings.init(applicationContext)
         FoxyAccount.init(applicationContext)
-        FoxyLibraryStore.init(applicationContext)
-        FoxyUserPlaylists.init(applicationContext)
-        MusicPlayer.init(applicationContext)
-        FoxyMedia3Downloads.ensureInitialized(applicationContext)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            FoxyLibraryStore.init(applicationContext)
+            FoxyRecognitionHistory.init(applicationContext)
+            FoxyUserPlaylists.init(applicationContext)
+            MusicPlayer.init(applicationContext)
+            FoxyMedia3Downloads.ensureInitialized(applicationContext)
+        }
 
         val b = FoxyFlutterBridge(this)
         bridge = b
@@ -97,6 +142,27 @@ class MainActivity : FlutterFragmentActivity() {
         FoxyHomeBackground.clear(applicationContext)
         bridge?.emitAppearanceChanged()
         result.success(mapOf("ok" to true))
+    }
+
+    fun importLocalAudio(result: MethodChannel.Result) {
+        pendingLocalAudioResult = result
+        importLocalAudioLauncher.launch("audio/*")
+    }
+
+    fun startRecognition(result: MethodChannel.Result) {
+        pendingRecognitionResult = result
+        when (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+        ) {
+            PackageManager.PERMISSION_GRANTED -> {
+                pendingRecognitionResult = null
+                bridge?.startRecognition()
+                result.success(mapOf("ok" to true))
+            }
+            else -> requestRecordAudioPermissionLauncher.launch(
+                Manifest.permission.RECORD_AUDIO,
+            )
+        }
     }
 
     fun restartApp() {

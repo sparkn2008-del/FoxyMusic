@@ -1,401 +1,241 @@
-FoxyMusic instructions
-======================
+FoxyMusic — Maintainer & Agent Instructions
+==========================================
 
-Project overview (maintainers): see also docs/README.md in the repository root for
-architecture, layout, and a short summary of what FoxyMusic is.
+Repository : https://github.com/sparkn2008-del/FoxyMusic
+Stack       : Android (Kotlin + Media3) + Flutter UI (repo-root module)
+Package     : com.foxymusic
+Current     : versionName 1.3.0 · versionCode 7
 
-
-What this app is
-----------------
-FoxyMusic is an Android music app with:
-
-- Flutter frontend UI at the repository root:
-  - pubspec.yaml
-  - lib/main.dart
-  - .android/
-  - .ios/
-
-- Kotlin/Android backend and host app:
-  - app/src/main/java/com/foxymusic/
-  - app/build.gradle
-  - settings.gradle
-
-Important: the old foxy_flutter_ui folder is legacy. New Flutter UI work should be done in:
-
-  D:\FoxyMusic\lib\main.dart
-
-Do not add new UI work under:
-
-  D:\FoxyMusic\foxy_flutter_ui
+This file is the single source of truth for agents, contributors, and release
+engineering. The public-facing README is README.md (Metrolist-style). Extended
+architecture notes live in docs/README.md.
 
 
-Changelog (recent)
-------------------
-Use this section as a high-level history for agents and maintainers. Dates are as on the
-machine where changes were verified (2026).
-
-2026-05-14 — Flutter shell, bridge, downloads, theme, notification
-
-  - EventChannel (FoxyFlutterBridge.kt): fixed a bug where onCancel cleared every EventSink,
-    which broke the mini player after closing the now-playing sheet. One broadcast pipeline
-    now fans out player + sleep-timer events to all listeners.
-
-  - playerState payload: Kotlin combines MusicPlayer state, FoxyDynamicTheme.accent, and
-    FoxySettings so each event can include:
-      - dynamicSongColors (bool)
-      - songAccentArgb (nullable int) when song-based colors are enabled
-    Flutter reads these instead of decoding artwork in Dart.
-
-  - FoxyDynamicTheme.kt: clearAccent() when the player is released; clear when a track has
-    no artwork URL so the previous track's color does not stick.
-
-  - Offline downloads (FoxyLibraryStore.kt): sidecar metadata file per download:
-      <downloadsDir>/<videoId>.foxy-meta.json
-    written when a song is marked downloaded (title, artist, thumbs, etc.). Cold start
-    restores real titles; without meta, fallbacks use the video id and YouTube poster URLs.
-
-  - Theme presets (FoxySettings.kt): "Electric Blue" and "Matcha" palettes removed; four
-    presets remain (Foxy, Aurora, Midnight Gold, Rosewave). Flutter settings chips match.
-
-  - Flutter (lib/main.dart): home secondary mood chip row removed; mini player anchored with
-    corrected bottom padding; settings/about copy tightened; full-player menu gained
-    YTM-style actions (radio, share, open in browser, remove download when applicable);
-    Switch styling uses theme primary instead of harsh default red.
-
-  - Media notification (FoxyMediaSessionService.kt): dedicated channel foxy_playback with
-    strings in res/values/strings.xml; DefaultMediaNotificationProvider bound to that
-    channel; small icon uses a system media drawable.
-
-  - Dependencies: palette_generator removed from pubspec.yaml (discontinued); artwork
-    accent for Flutter comes from Kotlin only.
-
-  - Builds: assembleRelease and compileDebugKotlin verified OK on this tree; flutter analyze
-    clean for the project.
-
-2026-05-14 — Flutter UI shell polish (streaming-style dark UI)
-
-  - Shared layout tokens in lib/main.dart: true-black base, nav pill fill, mini-player
-    fallback tint, _kCardRadius (12). _FoxySurface supports an optional cornerRadius (e.g.
-    bottom navigation uses a larger radius).
-
-  - MaterialApp theme: chipTheme and snackBarTheme so chips and floating snack bars match
-    the dark rounded shell.
-
-  - Search: pill-style field and suggestion chips; list row artwork uses thumbRadius 10;
-    header title sizing aligned with Library.
-
-  - Library: shuffle + play on non-Liked sections; liked / favorite flows with toolbar and
-    menus; consistent row corner radii where list tiles show artwork.
-
-  - Home: shuffle control next to Play all on horizontal shelves.
-
-  - Now playing: sheet top corner radius 22; blurred artwork backdrop when blur effects are
-    enabled (appearance from Kotlin); mini-player like control reflects like/unlike state.
-
-  - Lyrics: centered loading state; _EmptyTabBody when there is no synced lyrics; active
-    line highlight with rounded rectangle; section titles; lyrics peek card uses _kCardRadius.
-    Empty state icon uses Icons.subtitles_off_rounded (Material Icons has no lyrics_off_rounded).
-
-  - Queue: _EmptyTabBody when empty; header typography; queue rows use thumbRadius 10 on art.
-
-  - Account hub: summary card with border and _kCardRadius; profile title scale; hub list
-    tiles with rounded thumbnails.
-
-  - Settings: card surfaces and drawer header borders; language and proxy TextFields use
-    rounded OutlineInputBorder; header chips and _CompactSegment use explicit shapes with
-    _kCardRadius.
-
-  - Player chrome: full-player utility row (_UtilityButton) and tab row (_PlayerTabs) use
-    rounded button shapes; player action menu artwork radius 10; progress-style picker tiles
-    and menu quick actions use _kCardRadius instead of ad-hoc 8px corners.
-
-  - Dart release compile: _FlutterAppearance const constructor default fields surfaceHigh
-    and muted must use const Color(...) so const _FlutterAppearance() is valid in release mode.
-
-
-How the app works
+QUICK ORIENTATION
 -----------------
-The Android app hosts the Flutter UI. Flutter handles the visible screens, player sheet,
-library, settings sheet, lyrics UI, search UI, and home layout.
+  Kotlin owns truth for playback, persistence, networking, recognition, updates.
+  Flutter owns screens, animations, and most user-visible layout.
+  Never add new UI under foxy_flutter_ui/ — it is legacy and gitignored.
 
-Kotlin handles the native app logic:
-
-- Playback and queue:
-  app/src/main/java/com/foxymusic/MusicPlayer.kt
-  app/src/main/java/com/foxymusic/FoxyPlayerConnection.kt
-
-- Flutter method/event channel bridge:
-  app/src/main/java/com/foxymusic/FoxyFlutterBridge.kt
-  app/src/main/java/com/foxymusic/FoxyFlutterChannels.kt
-
-- YouTube Music search/feed/lyrics/account helpers:
-  app/src/main/java/com/foxymusic/YTMusicApi.kt
-  app/src/main/java/com/foxymusic/LyricsRepository.kt
-  app/src/main/java/com/foxymusic/FoxyAccount.kt
-
-- Library, likes, downloads, history:
-  app/src/main/java/com/foxymusic/FoxyLibraryStore.kt
-  app/src/main/java/com/foxymusic/FoxyDownloadManager.kt
-
-- Settings persistence and theme:
-  app/src/main/java/com/foxymusic/FoxySettings.kt
-  app/src/main/java/com/foxymusic/FoxyDynamicTheme.kt
-
-- Foreground media session / system notification:
-  app/src/main/java/com/foxymusic/FoxyMediaSessionService.kt
-  (MainActivity requests POST_NOTIFICATIONS on Android 13+.)
+  Primary Dart entry : lib/main.dart
+  Bridge             : FoxyFlutterChannels.kt + FoxyFlutterBridge.kt
+  Player engine      : MusicPlayer.kt + FoxyMediaSessionService.kt
+  YT API             : YTMusicApi.kt, StreamExtractor.kt
 
 
-Flutter <-> Kotlin channels
----------------------------
-Flutter talks to Kotlin through these channels in lib/main.dart:
+BUILD COMMANDS (Windows, repo root)
+-----------------------------------
+  .\gradlew.bat assembleDebug
+  .\gradlew.bat assembleRelease
+  .\gradlew.bat bundleRelease
 
-  MethodChannel: foxy_music/methods
-  EventChannel : foxy_music/events
+Outputs
+  app\build\outputs\apk\debug\
+  app\build\outputs\apk\release\     (per-ABI splits)
+  app\build\outputs\bundle\release\app-release.aab
 
-Common Flutter -> Kotlin method calls:
+Requirements
+  JDK 17+
+  Android SDK API 34+
+  Flutter SDK (for lib/ — Puro path example:
+    C:\Users\<user>\.puro\envs\stable\flutter\bin\flutter.bat)
 
-- getAppearance
-- setAppearance
-- homeFeed
-- moodMix
-- search
-- libraryFeed
-- accountInfo
-- playQueue
-- togglePlayPause
-- previous
-- next
-- seekTo
-- toggleShuffle
-- cycleRepeatMode
-- like
-- download
-- addToQueue
-- enqueuePlayNext
-- removeFromQueue
-- sleepTimer
-- cancelSleepTimer
-- lyrics
-- openSystemEqualizer
-- openWebLogin
-- openExternalUrl
-
-Kotlin sends player state updates to Flutter through the event channel with:
-
-  type = playerState
-
-Each playerState map (under key "state") includes at least:
-
-  - isPlaying, isBuffering, positionMs, durationMs, queueIndex
-  - shuffleEnabled, repeatMode, error
-  - queue (list of song maps), currentSong (song map or null)
-  - dynamicSongColors (bool, mirrors settings)
-  - songAccentArgb (nullable number, ARGB when dynamicSongColors is true and artwork accent
-    has been computed; null otherwise)
-
-Kotlin sends sleep timer updates with:
-
-  type = sleepTimer
-
-The Flutter UI listens for playerState and updates the mini player, now playing sheet,
-queue, lyrics position, buffering state, and playback controls. Do not add a second
-independent Dart-only artwork palette unless you also update Kotlin; keep one pipeline.
-
-
-Offline downloads and metadata
--------------------------------
-Progressive downloads (FoxyDownloadManager) write media files under the app external files
-downloads folder. When a download completes, FoxyLibraryStore writes:
-
-  <videoId>.foxy-meta.json
-
-next to the media file with title, artist, thumbnail, artworkUrl, duration, album.
-
-On boot, loadDownloadedSongs reads only known media extensions and skips *.foxy-meta.json.
-If meta is missing (older installs), songs still get YouTube thumbnail URLs from the
-stored video id.
-
-
-Editing guide
--------------
-For frontend UI changes:
-
-  D:\FoxyMusic\lib\main.dart
-
-For backend/player/channel changes:
-
-  D:\FoxyMusic\app\src\main\java\com\foxymusic
-
-If you add a new Flutter button that needs native behavior:
-
-1. Add a method name in:
-   app/src/main/java/com/foxymusic/FoxyFlutterChannels.kt
-
-2. Handle the method in:
-   app/src/main/java/com/foxymusic/FoxyFlutterBridge.kt
-
-3. Call it from Flutter using:
-   _method.invokeMethod('methodName', optionalMap)
-
-If you add new fields to playerState for Flutter, update:
-
-  - FoxyFlutterBridge.kt (emit payload)
-  - lib/main.dart (parsing / UI as needed)
-
+Release signing
+  Copy key.properties.example → key.properties
+  Fill storeFile, storePassword, keyAlias, keyPassword
+  Without key.properties, release may sign with debug key (see app/build.gradle)
 
 Useful checks
--------------
-The system may not have flutter or dart on PATH. This workspace uses Puro Flutter here:
-
-  C:\Users\dnm\.puro\envs\stable\flutter\bin\flutter.bat
-  C:\Users\dnm\.puro\envs\stable\flutter\bin\cache\dart-sdk\bin\dart.exe
-
-Format Flutter:
-
-  C:\Users\dnm\.puro\envs\stable\flutter\bin\cache\dart-sdk\bin\dart.exe format lib\main.dart
-
-Analyze Flutter (whole project):
-
-  C:\Users\dnm\.puro\envs\stable\flutter\bin\flutter.bat analyze
-
-Analyze a single file:
-
-  C:\Users\dnm\.puro\envs\stable\flutter\bin\flutter.bat analyze lib\main.dart
+  flutter analyze lib/main.dart
+  .\gradlew.bat :app:compileDebugKotlin
 
 
-Gradle tips (this machine)
---------------------------
-If the daemon fails to bind or file-lock errors appear during shutdown, you can force a
-dedicated Gradle user home for one build:
-
-  set GRADLE_USER_HOME=D:\FoxyMusic\.gradle-user-home4
-  .\gradlew.bat assembleRelease --no-daemon --console=plain
-
-On this machine Gradle can finish successfully but still print or return an error during
-daemon shutdown:
-
-  IllegalStateException: Cannot start managing file contention because this handler has been closed.
-
-If this happens, check the daemon log and APK timestamps before assuming the build failed.
-
-The useful success line looks like:
-
-  BUILD SUCCESSFUL
-
-The real output folder to check is:
-
-  D:\FoxyMusic\app\build\outputs\apk\release   (release APK splits)
-  D:\FoxyMusic\app\build\outputs\bundle\release   (release .aab when you run bundleRelease)
-  D:\FoxyMusic\app\build\outputs\apk\debug     (debug)
-
-Make sure the LastWriteTime of the APK files changed after the build.
+VERSION BUMP CHECKLIST
+----------------------
+  1. app/build.gradle
+       versionCode  (int, strictly increasing)
+       versionName  (semver string, shown in UI + GitHub compare)
+  2. pubspec.yaml version (Flutter module metadata; keep aligned)
+  3. lib/main.dart → _kAppVersionLabel / _kAppVersionName if hard-coded
+  4. changelog.txt — user-facing bullet list
+  5. README.md — "Current version" line if present
+  6. Tag release on GitHub after APK upload
 
 
-Build debug APKs
-----------------
-From:
+FLUTTER ↔ KOTLIN BRIDGE
+-----------------------
+Channels (FoxyFlutterChannels.kt)
 
-  D:\FoxyMusic
+  MethodChannel : foxy_music/methods
+  EventChannel  : foxy_music/events
 
-Run:
+Dart (lib/main.dart)
 
-  .\gradlew.bat assembleDebug
+  const _method = MethodChannel('foxy_music/methods');
+  const _events = EventChannel('foxy_music/events');
 
-Debug APKs are created under:
+When adding a method
+  1. Add constant in FoxyFlutterChannels.Methods
+  2. Handle in FoxyFlutterBridge.onMethodCall
+  3. Call from Dart via _method.invokeMethod(...)
+  4. Document here + docs/README.md if public-facing
 
-  D:\FoxyMusic\app\build\outputs\apk\debug
+Core methods (non-exhaustive)
+  getAppearance / setAppearance   Theme, playback prefs, updater toggles
+  getPlayerState                  Queue, transport, crossfade, lyrics pref
+  playQueue / pause / resume / seekTo / next / previous
+  download / removeDownload       Offline library
+  getLibraryFeed / getHomeFeed    Shelves + library snapshots
+  checkGitHubRelease              Manual update check → map
+  getAppVersion                   { versionName, versionCode }
+  openExternalUrl                 Browser / APK download
+  startRecognition / stopRecognition / getRecognitionHistory
+  backupLibrary / restoreLibrary  FoxyBackup.kt
 
-Expected split APK names:
+Core events (map with "type" field)
+  playerState           Full player snapshot (emit on transport changes)
+  appearanceChanged     Settings/theme applied
+  libraryFeedChanged    Library or downloads mutated
+  updateAvailable       { update: { ok, updateAvailable, tagName, ... } }
+  recognitionResult     Mic identification finished
+  recognitionHistoryChanged
 
-  app-arm64-v8a-debug.apk
-  app-armeabi-v7a-debug.apk
-  app-x86_64-debug.apk
-
-
-Build release APKs
-------------------
-From:
-
-  D:\FoxyMusic
-
-Normal release build:
-
-  .\gradlew.bat assembleRelease
-
-Force a fresh release rebuild:
-
-  .\gradlew.bat assembleRelease --rerun-tasks --no-daemon --console=plain --stacktrace
-
-Release APKs are created under:
-
-  D:\FoxyMusic\app\build\outputs\apk\release
-
-Expected split APK names:
-
-  app-arm64-v8a-release.apk
-  app-armeabi-v7a-release.apk
-  app-x86_64-release.apk
-
-The app currently uses debug signing for release builds in app/build.gradle:
-
-  signingConfig signingConfigs.debug
-
-For Play Store or public production release, replace this with a real release keystore.
+Player state hygiene
+  FoxyFlutterBridge merges live ExoPlayer position/duration into snapshots.
+  Buffering is suppressed when effectively playing (avoids stuck mini-player).
 
 
-Build release App Bundle (Play Store)
--------------------------------------
-From:
+HOME FEED
+---------
+Kotlin assembly : FoxyFlutterBridge.kt (home feed builder)
+Fallback rows   : YTMusicApi.fallbackRecommendationSections()
+Dart layout     : _homeSectionLayout() in lib/main.dart
+Dart suppression: _isSuppressedHomeSection()
 
-  D:\FoxyMusic
+Layout kinds (_HomeSectionLayout)
+  square  — horizontal card rail (resume, replayed, downloaded)
+  grid    — 2-column shelf (today on foxy, india pulse, hidden gems, covers…)
+  radio   — compact two-row radio starters
+  mixes   — mix cards
+  video   — wide video thumbnails
+  chart   — chart shelf
+  artist  — circular artist avatars
+  cards   — vertical song list
 
-Run (APKs and AAB in one go):
+Explore launcher (Moods / Genres / Charts) inserts after "New releases"
+via _homeFeedSlivers() in _HomeTabState.
 
-  .\gradlew.bat assembleRelease bundleRelease --no-daemon
-
-Or bundle only:
-
-  .\gradlew.bat bundleRelease --no-daemon
-
-Signed release bundle output:
-
-  D:\FoxyMusic\app\build\outputs\bundle\release\app-release.aab
-
-The same signing caveat applies (debug signing until a release keystore is configured).
+Spacing constants (lib/main.dart)
+  _kHomeShelfGap        Vertical gap between shelves (14)
+  _kHomeShelfTitleGap   Title → content (8)
+  _kHomeExploreRailGap  Between explore rails (14)
+  _HomeShelfShell       Wrapper applying shelf top gap
 
 
-Media notification checklist
+NOW PLAYING
+-----------
+Main sheet : _NowPlayingSheet in lib/main.dart
+Footer alt : lib/now_playing_footer.dart (SimpMusic-style path)
+Lyrics tab : lib/now_playing_surfaces.dart
+
+Spacing (screen-height based inside LayoutBuilder)
+  titleSeekGap      viewH * 0.05  (title row → seek bar)
+  controlsLyricsGap viewH * 0.02  (transport → compact lyrics card)
+
+Notification layout : app/src/main/res/layout/notification_foxy_media.xml
+  RemoteViews-safe only — no raw <View> or <Space>; use margins / empty TextView.
+
+
+PLAYBACK & SETTINGS (Kotlin)
+----------------------------
+MusicPlayer.kt          ExoPlayer queue, crossfade ramps, buffering
+FoxySettings.kt         Persisted prefs (crossfade, normalize, quality, etc.)
+FoxyMediaSessionService Foreground notification + media session
+StreamExtractor.kt      Stream URL resolution, quality ladders
+YtmRadioSession.kt      Radio tail continuation
+
+Notable Flutter settings surfaces
+  Stream / download quality, Ultra path, SoundCloud-first
+  Crossfade ms, normalize volume, skip silence
+  SponsorBlock, recognition source & history limit
+  Auto update check + notification toggle
+
+
+RECOGNITION
+-----------
+FoxyRecognition.kt
+FoxyRecognitionShazamSignatureGenerator.kt
+FoxyRecognitionVibraSignature.kt
+FoxyRecognitionHistory.kt
+
+Mic flow starts from home top bar → bridge → native capture + identify.
+
+
+UPDATER (GitHub releases/latest)
+--------------------------------
+Kotlin
+  FoxyGithubUpdate.kt    Semver-ish compare, prefers arm64-v8a APK asset
+  FoxyUpdatePrefs.kt     24h throttle (last_check_ms), last_notified_tag
+  FoxyUpdateNotifier.kt  Channel "foxy_app_updates"
+
+Settings keys (via appearance map)
+  autoCheckUpdates      default true
+  updateNotifications   default true
+
+Flow
+  1. Flutter subscribes to EventChannel → bridge may run throttled auto-check
+  2. Newer tag than installed versionName → updateAvailable event + optional notification
+  3. Settings "Check for updates now" → checkGitHubRelease (no throttle)
+  4. openExternalUrl for release page or APK
+
+
+GLASS UI RULES (Flutter)
+------------------------
+  _FoxyGlassTint      Scroll surfaces — no BackdropFilter (avoids jank)
+  _FoxyGlassButton    blur: true only on fixed chrome (nav, header pills)
+  Home shelf cards    Do not use selected: true for bg tint — active state via
+                      artwork overlay / accent text only
+
+Assets (pubspec.yaml)
+  assets/images/app_art.png      App logo (top bar, about)
+  assets/images/foxy_home_bg.png   Home backdrop
+  assets/images/foxy_splash.png    Splash
+  assets/images/splash/            Frame sequence for startup fox
+
+
+PROJECT LAYOUT
+--------------
+  app/src/main/java/com/foxymusic/   All native logic
+  lib/                               Flutter UI modules
+  assets/images/                     Bundled art
+  gradle/ + gradlew.bat              Wrapper
+  changelog.txt                      Release notes (user-facing)
+  README.md                          GitHub landing page
+  docs/README.md                     Architecture supplement
+
+Do NOT commit
+  build/, .gradle/, key.properties, *.jks
+  ArchiveTune-main/, .codex-backups/, reference zips
+  *.log, adb screenshots, _last_*.txt
+
+
+AGENT WORKFLOW
+--------------
+1. Read this file + grep the feature area before editing.
+2. Kotlin first if playback, downloads, API, or persistence changes.
+3. Expose bridge contract, then wire Flutter.
+4. Keep diffs focused — match existing naming and patterns.
+5. Run flutter analyze and/or gradlew compile when possible.
+6. Update changelog.txt for user-visible changes.
+7. Do not commit unless the user explicitly asks.
+
+
+CHANGELOG (engineering mirror)
 ------------------------------
-- Channel id used by the app for playback: foxy_playback (see FoxyMediaSessionService).
-- User must allow notifications on Android 13+ (MainActivity requests POST_NOTIFICATIONS).
-- If the notification does not appear while audio plays, check OEM battery restrictions and
-  notification permission for FoxyMusic.
+2026-06 — v1.3.0 Flutter-first UI: home shelf spacing, resume horizontal rail,
+           now playing gaps, notification RemoteViews fix, playback resync,
+           settings cleanup, logo asset wiring, recognition stack.
+2026-06 — v1.2.2 GitHub updater, ultra quality path, theme refresh.
+2026-05 — v1.2.x Glass UI, crossfade, LRCLIB lyrics, mini player polish.
 
-
-Last known successful release build
------------------------------------
-Command (APKs + Play bundle):
-
-  .\gradlew.bat assembleRelease bundleRelease --no-daemon
-
-Result (example on a cold-ish cache; times vary widely):
-
-  BUILD SUCCESSFUL in 24m 32s
-
-APK output directory:
-
-  D:\FoxyMusic\app\build\outputs\apk\release
-
-AAB output directory:
-
-  D:\FoxyMusic\app\build\outputs\bundle\release
-
-After any release build, confirm the three per-ABI APK files (and app-release.aab if you ran
-bundleRelease) show a new LastWriteTime in Explorer or with:
-
-  dir /T:W D:\FoxyMusic\app\build\outputs\apk\release\*.apk
-  dir /T:W D:\FoxyMusic\app\build\outputs\bundle\release\*.aab
-
-(Historical note: earlier successful runs on this machine reported BUILD SUCCESSFUL in
-about 10m 1s or 16m 35s for APK-only builds; first bundle+R8 paths can take longer.)
+User-facing bullets always go in changelog.txt first.

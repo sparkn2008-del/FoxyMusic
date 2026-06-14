@@ -1,6 +1,5 @@
 package com.foxymusic
 
-import android.net.Uri
 import java.io.Serializable
 
 /**
