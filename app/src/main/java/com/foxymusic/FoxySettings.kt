@@ -17,7 +17,7 @@ data class FoxyCustomization(
     val bottomNavScale: Int = 0,
     val gridColumns: Int = 2,
     val showBottomLabels: Boolean = true,
-    /** 0 = default, 1 = wavy, 2 = slim, 3 = squiggly. */
+    /** 0 = default, 1 = slim. Legacy values normalize back to 0. */
     val playerProgressStyle: Int = 0,
     /** Legacy: unused. */
     val playerSeekMotion: Int = 0,
@@ -45,12 +45,21 @@ data class FoxyCustomization(
     val lyricsPreferLrclib: Boolean = true,
     /** Show synced lyrics in Latin / English letters (romanization). */
     val lyricsRomanize: Boolean = false,
-    /** 0 = low, 1 = balanced, 2 = high, 3 = ultra aggressive. */
+    /** 0 = low (<128), 1 = balanced, 2 = normal (~128), 3 = high (>250), 4 = ultra (best/lossless if available). */
     val streamQualityTier: Int = 2,
     /** Separate preference for offline downloads. */
     val downloadQualityTier: Int = 2,
+    /** Network-specific stream tiers. -1 follows [streamQualityTier]. */
+    val wifiQualityTier: Int = -1,
+    val mobileQualityTier: Int = -1,
     /** 0 = YouTube only, 1 = YouTube then SoundCloud, 2 = SoundCloud then YouTube. */
     val streamSourcePriority: Int = 0,
+    /** 0 = auto/highest confidence, 1 = YT/SoundCloud first, 2 = Spotify/Canvas first, 3 = song cover first. */
+    val artworkPriority: Int = 0,
+    /** 0 = built-in Shazam-style fingerprint, 1 = Android microphone/fast path. */
+    val recognitionSource: Int = 0,
+    /** Local recognition history cap. */
+    val recognitionHistoryLimit: Int = 40,
     /** Use the saved custom wallpaper on Home/Search/Library instead of the default gradient. */
     val homeBackgroundEnabled: Boolean = false,
     /** BCP-47 tag for catalogue / search bias (stored for future API use). */
@@ -123,7 +132,12 @@ object FoxySettings {
     private const val LYRICS_ROMANIZE = "lyrics_romanize"
     private const val STREAM_QUALITY = "stream_quality_tier"
     private const val DOWNLOAD_QUALITY = "download_quality_tier"
+    private const val WIFI_QUALITY = "wifi_quality_tier"
+    private const val MOBILE_QUALITY = "mobile_quality_tier"
     private const val STREAM_SOURCE_PRIORITY = "stream_source_priority"
+    private const val ARTWORK_PRIORITY = "artwork_priority"
+    private const val RECOGNITION_SOURCE = "recognition_source"
+    private const val RECOGNITION_HISTORY_LIMIT = "recognition_history_limit"
     private const val HOME_BACKGROUND_ENABLED = "home_background_enabled"
     private const val CONTENT_LANG = "content_language_tag"
     private const val APP_LANG = "app_language_tag"
@@ -138,6 +152,8 @@ object FoxySettings {
     private val _state = MutableStateFlow(FoxyCustomization())
     val state: StateFlow<FoxyCustomization> = _state
     private var appContext: Context? = null
+
+    private fun normalizePlayerProgressStyle(value: Int): Int = if (value == 1) 1 else 0
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -154,9 +170,11 @@ object FoxySettings {
             bottomNavScale = prefs.getInt(BOTTOM_NAV_SCALE, 0).coerceIn(0, 2),
             gridColumns = prefs.getInt(GRID_COLUMNS, 2).coerceIn(2, 4),
             showBottomLabels = prefs.getBoolean(BOTTOM_LABELS, true),
-            playerProgressStyle = prefs.getInt(PLAYER_PROGRESS_STYLE, 0).coerceIn(0, 3),
-            playerSeekMotion = prefs.getInt(PLAYER_SEEK_MOTION, 0).coerceIn(0, 2),
-            playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 3),
+            playerProgressStyle = normalizePlayerProgressStyle(
+                prefs.getInt(PLAYER_PROGRESS_STYLE, 0),
+            ),
+            playerSeekMotion = 0,
+            playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 2),
             playerStyle = prefs.getInt(PLAYER_STYLE, 0).coerceIn(0, 2),
             playerButtonsStyle = prefs.getInt(PLAYER_BUTTONS_STYLE, 0).coerceIn(0, 2),
             playerArtworkShape = prefs.getInt(PLAYER_ARTWORK_SHAPE, 0).coerceIn(0, 2),
@@ -175,7 +193,12 @@ object FoxySettings {
             lyricsRomanize = prefs.getBoolean(LYRICS_ROMANIZE, false),
             streamQualityTier = prefs.getInt(STREAM_QUALITY, 2).coerceIn(0, 4),
             downloadQualityTier = prefs.getInt(DOWNLOAD_QUALITY, 2).coerceIn(0, 4),
+            wifiQualityTier = prefs.getInt(WIFI_QUALITY, -1).coerceIn(-1, 4),
+            mobileQualityTier = prefs.getInt(MOBILE_QUALITY, -1).coerceIn(-1, 4),
             streamSourcePriority = prefs.getInt(STREAM_SOURCE_PRIORITY, 0).coerceIn(0, 2),
+            artworkPriority = prefs.getInt(ARTWORK_PRIORITY, 0).coerceIn(0, 3),
+            recognitionSource = prefs.getInt(RECOGNITION_SOURCE, 0).coerceIn(0, 1),
+            recognitionHistoryLimit = prefs.getInt(RECOGNITION_HISTORY_LIMIT, 40).coerceIn(10, 100),
             homeBackgroundEnabled = prefs.getBoolean(HOME_BACKGROUND_ENABLED, false),
             contentLanguageTag = prefs.getString(CONTENT_LANG, "en-US") ?: "en-US",
             appLanguageTag = prefs.getString(APP_LANG, "").orEmpty(),
@@ -207,9 +230,12 @@ object FoxySettings {
             ?.putInt(BOTTOM_NAV_SCALE, next.bottomNavScale)
             ?.putInt(GRID_COLUMNS, next.gridColumns)
             ?.putBoolean(BOTTOM_LABELS, next.showBottomLabels)
-            ?.putInt(PLAYER_PROGRESS_STYLE, next.playerProgressStyle.coerceIn(0, 3))
-            ?.putInt(PLAYER_SEEK_MOTION, next.playerSeekMotion.coerceIn(0, 2))
-            ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 3))
+            ?.putInt(
+                PLAYER_PROGRESS_STYLE,
+                normalizePlayerProgressStyle(next.playerProgressStyle),
+            )
+            ?.putInt(PLAYER_SEEK_MOTION, 0)
+            ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_STYLE, next.playerStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_BUTTONS_STYLE, next.playerButtonsStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_ARTWORK_SHAPE, next.playerArtworkShape.coerceIn(0, 2))
@@ -223,7 +249,12 @@ object FoxySettings {
             ?.putBoolean(LYRICS_ROMANIZE, next.lyricsRomanize)
             ?.putInt(STREAM_QUALITY, next.streamQualityTier.coerceIn(0, 4))
             ?.putInt(DOWNLOAD_QUALITY, next.downloadQualityTier.coerceIn(0, 4))
+            ?.putInt(WIFI_QUALITY, next.wifiQualityTier.coerceIn(-1, 4))
+            ?.putInt(MOBILE_QUALITY, next.mobileQualityTier.coerceIn(-1, 4))
             ?.putInt(STREAM_SOURCE_PRIORITY, next.streamSourcePriority.coerceIn(0, 2))
+            ?.putInt(ARTWORK_PRIORITY, next.artworkPriority.coerceIn(0, 3))
+            ?.putInt(RECOGNITION_SOURCE, next.recognitionSource.coerceIn(0, 1))
+            ?.putInt(RECOGNITION_HISTORY_LIMIT, next.recognitionHistoryLimit.coerceIn(10, 100))
             ?.putBoolean(HOME_BACKGROUND_ENABLED, next.homeBackgroundEnabled)
             ?.putString(CONTENT_LANG, next.contentLanguageTag)
             ?.putString(APP_LANG, next.appLanguageTag)

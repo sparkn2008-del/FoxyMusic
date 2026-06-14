@@ -26,6 +26,13 @@ data class AccountInfo(
     val avatarUrl: String
 )
 
+data class ArtistProfileResult(
+    val name: String,
+    val browseId: String,
+    val thumbnail: String,
+    val subscribers: String? = null
+)
+
 object YTMusicApi {
 
     private const val TAG = "YTMusicApi"
@@ -61,10 +68,11 @@ object YTMusicApi {
 
     // ====================== PUBLIC API ======================
 
-    suspend fun homeRecommendations(): List<RecommendationSection> {
+    suspend fun homeRecommendations(params: String? = null): List<RecommendationSection> {
         val json = post("browse", JSONObject().apply {
             put("context", clientContext())
             put("browseId", "FEmusic_home")
+            params?.takeIf { it.isNotBlank() }?.let { put("params", it) }
         }) ?: return fallbackSections()
 
         return parseSections(json).ifEmpty { fallbackSections() }
@@ -145,6 +153,29 @@ object YTMusicApi {
             "albums" to search(query, filterAlbums).take(cap),
             "artists" to search(query, filterArtists).take(cap),
         )
+    }
+
+    /** Artist rows use browse/channel ids, not video ids, so parse them separately. */
+    suspend fun searchArtistProfiles(query: String, limit: Int = 12): List<ArtistProfileResult> {
+        if (query.isBlank()) return emptyList()
+        val json = post("search", JSONObject().apply {
+            put("context", clientContext())
+            put("query", query)
+            put("params", filterArtists)
+        }) ?: return emptyList()
+
+        val out = LinkedHashMap<String, ArtistProfileResult>()
+        walkObjects(json) { obj ->
+            val renderer = obj.optJSONObject("musicResponsiveListItemRenderer")
+                ?: obj.optJSONObject("musicTwoRowItemRenderer")
+                ?: return@walkObjects
+            val profile = parseArtistProfileRenderer(renderer) ?: return@walkObjects
+            val key = profile.browseId.ifBlank { profile.name.lowercase(Locale.US) }
+            if (key.isNotBlank() && !out.containsKey(key)) {
+                out[key] = profile
+            }
+        }
+        return out.values.take(limit.coerceIn(1, 24))
     }
 
     /**
@@ -487,6 +518,45 @@ object YTMusicApi {
         )
     }
 
+    private fun parseArtistProfileRenderer(renderer: JSONObject): ArtistProfileResult? {
+        val browseId = renderer.findBrowseId()
+        val thumbnail = renderer.findThumbnail()
+        if (browseId.isBlank() && thumbnail.isBlank()) return null
+
+        val columns = renderer.optJSONArray("flexColumns")
+        val title = columns
+            ?.optJSONObject(0)
+            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+            ?.optJSONObject("text")
+            ?.runsText()
+            ?.trim()
+            .orEmpty()
+            .ifBlank {
+                renderer.optJSONObject("title")?.runsText()?.trim().orEmpty()
+            }
+            .ifBlank {
+                renderer.findTextRuns().firstOrNull {
+                    it.isNotBlank() && it != "Artist" && !YtmMusicFilter.isDurationLike(it)
+                }.orEmpty()
+            }
+        if (title.isBlank()) return null
+
+        val subtitle = renderer.findTextRuns()
+            .drop(1)
+            .firstOrNull {
+                it.isNotBlank() &&
+                    it != title &&
+                    !it.equals("Artist", ignoreCase = true) &&
+                    !YtmMusicFilter.isDurationLike(it)
+            }
+        return ArtistProfileResult(
+            name = title,
+            browseId = browseId,
+            thumbnail = thumbnail,
+            subscribers = subtitle,
+        )
+    }
+
     private data class ItemMeta(
         val title: String,
         val artist: String,
@@ -569,7 +639,7 @@ object YTMusicApi {
 
     private fun fallbackSections(): List<RecommendationSection> = listOf(
         RecommendationSection(
-            "Quick picks",
+            "Radio starters",
             listOf(
                 Song("jfKfPfyJRdk", "lofi hip hop radio", "Lofi Girl", artworkUrl = "https://img.youtube.com/vi/jfKfPfyJRdk/maxresdefault.jpg"),
                 Song("5qap5aO4i9A", "chill beats", "YouTube Music", artworkUrl = "https://img.youtube.com/vi/5qap5aO4i9A/maxresdefault.jpg"),
@@ -608,6 +678,17 @@ object YTMusicApi {
             }
         }
         return id.takeIf { it.isNotBlank() }
+    }
+
+    private fun JSONObject.findBrowseId(): String {
+        var best = ""
+        walkObjects(this) { obj ->
+            if (best.isNotBlank()) return@walkObjects
+            val endpoint = obj.optJSONObject("browseEndpoint") ?: return@walkObjects
+            val id = endpoint.optString("browseId").trim()
+            if (id.isNotBlank()) best = id
+        }
+        return best
     }
 
     private fun JSONObject.findThumbnail(): String {

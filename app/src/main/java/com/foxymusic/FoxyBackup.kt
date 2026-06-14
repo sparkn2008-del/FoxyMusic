@@ -141,6 +141,10 @@ private fun FoxyCustomization.toBackupJson(): JSONObject = JSONObject().apply {
     put("blurEffects", blurEffects)
     put("compactPlayer", compactPlayer)
     put("gestureControls", gestureControls)
+    put("iconScale", iconScale)
+    put("bottomNavScale", bottomNavScale)
+    put("gridColumns", gridColumns)
+    put("showBottomLabels", showBottomLabels)
     put("dynamicSongColors", dynamicSongColors)
     put("saveHistory", saveHistory)
     put("persistentQueue", persistentQueue)
@@ -174,6 +178,11 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
             blurEffects = json.optBoolean("blurEffects", current.blurEffects),
             compactPlayer = json.optBoolean("compactPlayer", current.compactPlayer),
             gestureControls = json.optBoolean("gestureControls", current.gestureControls),
+            iconScale = json.optInt("iconScale", current.iconScale).coerceIn(0, 2),
+            bottomNavScale = json.optInt("bottomNavScale", current.bottomNavScale)
+                .coerceIn(0, 2),
+            gridColumns = json.optInt("gridColumns", current.gridColumns).coerceIn(2, 4),
+            showBottomLabels = json.optBoolean("showBottomLabels", current.showBottomLabels),
             dynamicSongColors = json.optBoolean("dynamicSongColors", current.dynamicSongColors),
             saveHistory = json.optBoolean("saveHistory", current.saveHistory),
             persistentQueue = json.optBoolean("persistentQueue", current.persistentQueue),

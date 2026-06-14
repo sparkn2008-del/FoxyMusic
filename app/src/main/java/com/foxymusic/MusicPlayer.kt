@@ -23,6 +23,11 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.LoadControl
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import androidx.core.content.getSystemService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,7 +44,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
-import kotlin.random.Random
+
 
 enum class SleepTimerMode { Off, AfterMinutes, AfterCurrentTrack }
 
@@ -235,11 +240,72 @@ object MusicPlayer {
             maybeTriggerCrossfadeAdvance(dur, pos)
             maybeSkipSponsor(pos)
 
-            delay(180)   // thoda tight kiya for smoother feel
+            delay(180)
         }
     }
 }
 
+    /**
+     * Dynamic LoadControl tuned for YouTube audio streams.
+     * Adapts buffer sizes based on WiFi vs Mobile + metered status.
+     */
+    @OptIn(UnstableApi::class)
+    private fun createDynamicLoadControl(context: Context): LoadControl {
+        val connectivityManager = context.getSystemService<ConnectivityManager>()
+        val network = connectivityManager?.activeNetwork
+        val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+
+        val isWifi = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        val isMetered = connectivityManager?.isActiveNetworkMetered == true
+
+        // Base conservative values good for flaky YT connections
+        var minBufferMs = 25_000
+        var maxBufferMs = 90_000
+        var bufferForPlaybackMs = 3_000
+        var bufferForPlaybackAfterRebufferMs = 8_000
+
+        when {
+            isWifi && !isMetered -> {
+                // Fast connection → faster start
+                minBufferMs = 18_000
+                maxBufferMs = 120_000
+                bufferForPlaybackMs = 2_000
+            }
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> {
+                // Mobile data → more buffering
+                if (isMetered) {
+                    minBufferMs = 35_000
+                    maxBufferMs = 70_000
+                    bufferForPlaybackMs = 5_000
+                } else {
+                    minBufferMs = 28_000
+                    bufferForPlaybackMs = 3_500
+                }
+            }
+            else -> {
+                // Poor/unknown network
+                minBufferMs = 40_000
+                bufferForPlaybackMs = 6_000
+            }
+        }
+
+        // Respect user's quality tier preference
+        if (FoxySettings.state.value.streamQualityTier >= 2) {
+            minBufferMs += 8_000
+            maxBufferMs += 30_000
+        }
+
+        return DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                minBufferMs,
+                maxBufferMs,
+                bufferForPlaybackMs,
+                bufferForPlaybackAfterRebufferMs
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
+            .build()
+    }
     /** SimpMusic-style target level when normalization is enabled (reduces hot masters). */
     private fun effectiveUserVolume(): Float {
         var level = userVolume
@@ -325,7 +391,7 @@ object MusicPlayer {
     private fun warmStreamUrl(videoId: String) {
         val vid = videoId.trim()
         if (vid.isEmpty()) return
-        val tier = FoxySettings.state.value.streamQualityTier
+        val tier = effectiveStreamQualityTier()
         if (StreamUrlCache.peek(vid, tier) != null) return
         if (!streamResolveInFlight.add(vid)) return
         scope.launch(Dispatchers.IO) {
@@ -335,6 +401,21 @@ object MusicPlayer {
                 streamResolveInFlight.remove(vid)
             }
         }
+    }
+
+    private fun effectiveStreamQualityTier(): Int {
+        val settings = FoxySettings.state.value
+        val fallback = settings.streamQualityTier.coerceIn(0, 4)
+        val ctx = appContext ?: return fallback
+        val cm = ctx.getSystemService<ConnectivityManager>() ?: return fallback
+        val network = cm.activeNetwork ?: return fallback
+        val capabilities = cm.getNetworkCapabilities(network) ?: return fallback
+        val override = when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> settings.wifiQualityTier
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> settings.mobileQualityTier
+            else -> -1
+        }
+        return if (override >= 0) override.coerceIn(0, 4) else fallback
     }
 
     /** Re-apply crossfade / normalization after settings change while playing. */
@@ -360,7 +441,6 @@ object MusicPlayer {
                 val target = if (dur > 0L) endMs.coerceAtMost(dur) else endMs
                 p.seekTo(target)
                 _state.update { it.copy(positionMs = target) }
-                Log.d("FoxyMusic", "SponsorBlock: skipped to ${target}ms")
                 return
             }
         }
@@ -645,7 +725,7 @@ object MusicPlayer {
             return
         }
 
-        val tier = FoxySettings.state.value.streamQualityTier
+        val tier = effectiveStreamQualityTier()
         StreamExtractor.peekCachedStreamResult(song.videoId, tier, song.streamSearchQuery())?.url?.let { url ->
             if (requestId != activePlayRequestId) return
             playResolved(context, url, song)
@@ -693,7 +773,6 @@ object MusicPlayer {
         queue = merged
         _state.update { it.copy(queue = queue, queueIndex = queueIndex) }
         schedulePreloadNextTrack()
-        Log.d("FoxyMusic", "Radio queue extended to ${queue.size} tracks (continuation=${updatedSession.continuation != null})")
         return true
     }
 
@@ -863,7 +942,7 @@ object MusicPlayer {
         val offlineBase = librarySong ?: song
         FoxyOfflineBundle.resolvePlayableUrl(context, offlineBase)?.let { return it }
         preloadedStream?.takeIf { it.first == song.videoId }?.second?.let { return it }
-        val tier = FoxySettings.state.value.streamQualityTier
+        val tier = effectiveStreamQualityTier()
         StreamExtractor.peekCachedStreamResult(song.videoId, tier, song.streamSearchQuery())?.url?.let { return it }
         return resolveFreshStreamResult(song, tier).url
     }
@@ -909,7 +988,6 @@ object MusicPlayer {
             exo.removeMediaItem(currentIndex + 1)
         }
         exo.addMediaItem(buildMediaItem(song, url))
-        Log.d("FoxyMusic", "Pre-attached next track for Exo preload: ${song.title}")
     }
 
     private fun trimPlayedMediaItemsBehindCurrent() {
@@ -1029,9 +1107,6 @@ object MusicPlayer {
     private fun playResolved(context: Context, url: String, song: Song, stream: StreamResult? = null) {
         appContext = context.applicationContext
         FoxyDynamicTheme.bindContext(context.applicationContext)
-        Log.d("FoxyMusic", "Attempting to play: ${song.title}")
-        Log.d("FoxyMusic", "Stream URL: $url")
-        Log.d("FoxyMusic", "Artwork candidates: ${song.artworkCandidates().joinToString()}")
         if (FoxySettings.state.value.saveHistory) {
             FoxyLibraryStore.addHistory(song)
         }
@@ -1077,8 +1152,8 @@ object MusicPlayer {
                     .setFlags(
                         CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR,
                     )
-
                 val exo = ExoPlayer.Builder(context.applicationContext)
+                    .setLoadControl(createDynamicLoadControl(context.applicationContext))
                     .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory))
                     .setAudioAttributes(
                         AudioAttributes.Builder()
@@ -1102,10 +1177,10 @@ object MusicPlayer {
                             it.copy(
                                 isBuffering = state == Player.STATE_BUFFERING,
                                 isPlaying = when (state) {
-                                    Player.STATE_READY -> p?.isPlaying ?: it.isPlaying
+                                    Player.STATE_READY -> p?.isPlaying == true
                                     Player.STATE_IDLE,
                                     Player.STATE_ENDED -> false
-                                    else -> it.isPlaying
+                                    else -> p?.isPlaying == true
                                 },
                                 error = if (state == Player.STATE_READY) null else it.error,
                                 durationMs = player?.duration?.takeIf { duration ->
@@ -1114,13 +1189,12 @@ object MusicPlayer {
                             )
                         }
                         when (state) {
-                            Player.STATE_BUFFERING -> Log.d("FoxyMusic", "Buffering...")
+                            Player.STATE_BUFFERING -> Unit
                             Player.STATE_READY -> {
-                                Log.d("FoxyMusic", "Ready to play!")
                                 _state.update {
                                     it.copy(
                                         isBuffering = false,
-                                        isPlaying = p?.isPlaying ?: it.isPlaying,
+                                        isPlaying = p?.isPlaying == true,
                                         error = null,
                                     )
                                 }
@@ -1128,9 +1202,7 @@ object MusicPlayer {
                                 schedulePreloadNextTrack()
                             }
                             Player.STATE_ENDED -> {
-                                Log.d("FoxyMusic", "Playback ended")
                                 if (suppressEndAdvance) {
-                                    Log.d("FoxyMusic", "Ignoring ENDED during track swap")
                                     return
                                 }
                                 // Never call prepare/stop/playNext synchronously from Player.Listener — ExoPlayer can crash.
@@ -1140,7 +1212,6 @@ object MusicPlayer {
                                     playbackMutex.withLock {
                                         if (suppressEndAdvance) return@withLock
                                         if (syncIfExoAlreadyOnDifferentTrack()) {
-                                            Log.d("FoxyMusic", "Gapless transition already on next track")
                                             return@withLock
                                         }
                                         if (stopAfterCurrentSong) {
@@ -1160,7 +1231,7 @@ object MusicPlayer {
                                     }
                                 }
                             }
-                            Player.STATE_IDLE -> Log.d("FoxyMusic", "Player idle")
+                            Player.STATE_IDLE -> Unit
                         }
                     }
                     override fun onPlayerError(error: PlaybackException) {
@@ -1177,7 +1248,7 @@ object MusicPlayer {
                             scope.launch {
                                 val ctx = appContext ?: return@launch
                                 try {
-                                    val tier = FoxySettings.state.value.streamQualityTier
+                                    val tier = effectiveStreamQualityTier()
                                     val result = withContext(Dispatchers.IO) {
                                         resolveFreshStreamResult(current, tier)
                                     }
@@ -1214,7 +1285,6 @@ object MusicPlayer {
                         }
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        Log.d("FoxyMusic", "Is playing: $isPlaying")
                         _state.update {
                             it.copy(isPlaying = isPlaying, isBuffering = false, error = null)
                         }
@@ -1247,16 +1317,9 @@ object MusicPlayer {
                             publishDurationFromPlayer()
                             _state.update {
                                 it.copy(
-                                    isBuffering = if (!player.isLoading && player.playbackState == Player.STATE_READY) {
-                                        false
-                                    } else {
-                                        it.isBuffering
-                                    },
-                                    isPlaying = if (player.playbackState == Player.STATE_READY) {
-                                        player.isPlaying
-                                    } else {
-                                        it.isPlaying
-                                    },
+                                    isBuffering = player.playbackState == Player.STATE_BUFFERING &&
+                                        !player.isPlaying,
+                                    isPlaying = player.isPlaying,
                                     durationMs = player.duration.takeIf { duration ->
                                         duration != C.TIME_UNSET && duration > 0
                                     } ?: it.durationMs
@@ -1278,6 +1341,8 @@ object MusicPlayer {
             exo.clearMediaItems()
             exo.setMediaItem(mediaItem, /* resetPosition= */ true)
             exo.prepare()
+            exo.playWhenReady = true
+            exo.play()
             scheduleBufferWatchdog(song.videoId, swapGen)
             FoxyMediaSessionService.refreshPlaybackNotification(context.applicationContext)
             if (!url.startsWith("file:", ignoreCase = true)) {
@@ -1312,12 +1377,14 @@ object MusicPlayer {
             val current = _state.value.currentSong ?: return@launch
             if (generation != suppressEndAdvanceGeneration) return@launch
             if (current.videoId != videoId) return@launch
-            if (!_state.value.isBuffering || _state.value.isPlaying) return@launch
+            val exo = player ?: return@launch
+            if (exo.playbackState != Player.STATE_BUFFERING) return@launch
+            if (exo.isPlaying) return@launch
             if (retryAttemptsForCurrent > 0) return@launch
             retryAttemptsForCurrent = 1
             StreamUrlCache.invalidate(videoId)
             val ctx = appContext ?: return@launch
-            val tier = FoxySettings.state.value.streamQualityTier
+            val tier = effectiveStreamQualityTier()
             val song = _state.value.currentSong?.takeIf { it.videoId == videoId }
                 ?: queue.firstOrNull { it.videoId == videoId }
                 ?: Song(videoId = videoId, title = videoId, artist = "")
@@ -1348,18 +1415,15 @@ object MusicPlayer {
                     Log.w("FoxyMusic", "togglePlayPause: no track loaded to restart")
                     return@launch
                 }
-                Log.d("FoxyMusic", "Reloading unloaded player for ${song.title}")
                 playPrepared(ctx, song)
                 return@launch
             }
             if (exo.isPlaying) {
                 _state.update { it.copy(isPlaying = false, isBuffering = false, error = null) }
                 exo.pause()
-                Log.d("FoxyMusic", "Paused")
             } else {
                 _state.update { it.copy(isPlaying = true, isBuffering = false, error = null) }
                 exo.play()
-                Log.d("FoxyMusic", "Resumed")
             }
         }
     }
@@ -1656,7 +1720,6 @@ object MusicPlayer {
             _sleepTimerState.value = SleepTimerUiState()
             sponsorRangesMs = emptyList()
             FoxyDynamicTheme.clearAccent()
-            Log.d("FoxyMusic", "Player released")
         }
     }
 

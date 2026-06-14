@@ -216,7 +216,6 @@ object StreamExtractor {
         var lastError: String? = null
 
         peekCachedStreamResult(videoId, tier, searchQuery)?.let { cached ->
-            Log.d(TAG, "Stream cache hit for $videoId")
             return cached.copy(source = cached.source ?: "cache")
         }
 
@@ -309,7 +308,6 @@ object StreamExtractor {
         lastError?.let { if (it !in extractorErrors) extractorErrors += it }
         when (val newPipeResult = getNewPipeStreamResult(videoId, maxBitrate)) {
             is ExtractorAttempt.Success -> {
-                Log.d(TAG, "NewPipe stream selected: ${newPipeResult.url.take(80)}")
                 val result = newPipeResult.toStreamResult()
                 val best = maybeUpgradeUltraWithAlternateSource(
                     videoId,
@@ -412,7 +410,6 @@ object StreamExtractor {
         val alternate = when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
             is ExtractorAttempt.Success -> result.toStreamResult()
             is ExtractorAttempt.Failure -> {
-                Log.d(TAG, "Ultra alternate source unavailable for $videoId: ${result.message}")
                 return current
             }
         }
@@ -471,7 +468,6 @@ object StreamExtractor {
                         pickBestPlayableStream(it, maxBitrate, qualityTier)
                     }
                     if (stream != null) {
-                        Log.d(TAG, "${ytClient.name} stream selected: itag=${stream.itag} ${stream.codec} ${stream.bitrate}bps")
                         return@use StreamResult(
                             stream.url,
                             source = ytClient.name,
@@ -686,11 +682,11 @@ object StreamExtractor {
         tier: Int,
     ): Int {
         val bitrate = optInt("bitrate", 0)
-        if (bitrate <= 0) return 0
         if (tier >= 4) {
             val ultraFloorBonus = if (bitrate >= 320_000) 250_000 else 0
-            return bitrate + ultraFloorBonus
+            return codecScore() * 1_000_000 + bitrate + ultraFloorBonus
         }
+        if (bitrate <= 0) return 0
         val target = preference.targetBitrate ?: return bitrate
         return 1_000_000 - kotlin.math.abs(target - bitrate)
     }

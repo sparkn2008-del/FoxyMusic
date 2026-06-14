@@ -18,6 +18,10 @@ object FoxyFlutterChannels {
         const val HOME_FEED = "homeFeed"
         const val SEARCH = "search"
         const val SEARCH_ALL = "searchAll"
+        const val SEARCH_HISTORY = "searchHistory"
+        const val ADD_SEARCH_HISTORY = "addSearchHistory"
+        const val REMOVE_SEARCH_HISTORY = "removeSearchHistory"
+        const val CLEAR_SEARCH_HISTORY = "clearSearchHistory"
         const val ACCOUNT_INFO = "accountInfo"
         const val MOOD_MIX = "moodMix"
         const val PLAY = "play"
@@ -75,6 +79,9 @@ object FoxyFlutterChannels {
         const val GET_RECOGNITION_HISTORY = "getRecognitionHistory"
         const val CLEAR_RECOGNITION_HISTORY = "clearRecognitionHistory"
         const val RESOLVE_RECOGNIZED_TRACK = "resolveRecognizedTrack"
+        const val RESOLVE_MOTION_ARTWORK = "resolveMotionArtwork"
+        const val RESOLVE_SPOTIFY_TRACK = "resolveSpotifyTrack"
+        const val RESOLVE_ARTIST_PROFILE = "resolveArtistProfile"
         /** Minimize app instead of finishing when Flutter handles the Android back gesture at root. */
         const val MOVE_TASK_TO_BACK = "moveTaskToBack"
         /** One-shot snapshot of the same map as [Events.PLAYER_STATE] `state` (for Flutter UI seeding). */

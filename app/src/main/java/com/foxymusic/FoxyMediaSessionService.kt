@@ -9,10 +9,15 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -154,7 +159,7 @@ class FoxyMediaSessionService : MediaSessionService() {
      */
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         try {
-            super.onUpdateNotification(session, startInForegroundRequired)
+            promoteToForeground("onUpdateNotification-custom")
         } catch (e: Exception) {
             val isFgPolicy =
                 e is ForegroundServiceStartNotAllowedException ||
@@ -223,6 +228,10 @@ class FoxyMediaSessionService : MediaSessionService() {
             )
         }
 
+        val customView = buildFoxyNotificationView(ui, largeIcon)
+        b.setCustomContentView(customView)
+        b.setCustomBigContentView(customView)
+
         if (ui.durationMs > 500 && !ui.isBuffering) {
             val max = 100
             val prog = ((ui.positionMs.coerceAtLeast(0L) * max) / ui.durationMs.coerceAtLeast(1L))
@@ -238,6 +247,81 @@ class FoxyMediaSessionService : MediaSessionService() {
         }
         return b.build()
     }
+
+    private fun buildFoxyNotificationView(
+        ui: PlayerUiState,
+        artwork: Bitmap?,
+    ): RemoteViews {
+        val song = ui.currentSong
+        val title = song?.title?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.app_name)
+        val artist = song?.artist?.trim()?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.playback_foreground_placeholder)
+        val views = RemoteViews(packageName, R.layout.notification_foxy_media)
+        views.setTextViewText(R.id.notif_title, title)
+        views.setTextViewText(R.id.notif_artist, artist)
+        views.setTextViewText(R.id.notif_device, "This phone")
+
+        val playPauseIcon =
+            if (ui.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
+        views.setImageViewResource(R.id.notif_top_play, playPauseIcon)
+        views.setImageViewResource(R.id.notif_play_pause, playPauseIcon)
+        views.setInt(R.id.notif_top_play, "setColorFilter", Color.rgb(48, 43, 58))
+        views.setInt(R.id.notif_play_pause, "setColorFilter", Color.rgb(48, 43, 58))
+
+        views.setOnClickPendingIntent(
+            R.id.notif_top_play,
+            mediaCommandPendingIntent(Player.COMMAND_PLAY_PAUSE),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_play_pause,
+            mediaCommandPendingIntent(Player.COMMAND_PLAY_PAUSE),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_prev,
+            mediaCommandPendingIntent(Player.COMMAND_SEEK_TO_PREVIOUS),
+        )
+        views.setOnClickPendingIntent(
+            R.id.notif_next,
+            mediaCommandPendingIntent(Player.COMMAND_SEEK_TO_NEXT),
+        )
+
+        if (ui.durationMs > 500 && !ui.isBuffering) {
+            val progress = ((ui.positionMs.coerceAtLeast(0L) * 100) /
+                ui.durationMs.coerceAtLeast(1L)).toInt().coerceIn(0, 100)
+            views.setProgressBar(R.id.notif_progress, 100, progress, false)
+        } else {
+            views.setProgressBar(R.id.notif_progress, 100, 0, ui.isBuffering)
+        }
+
+        artwork?.let { source ->
+            createNotificationBackdrop(source)?.let { backdrop ->
+                views.setImageViewBitmap(R.id.notif_artwork_bg, backdrop)
+            }
+        }
+        return views
+    }
+
+    private fun createNotificationBackdrop(source: Bitmap): Bitmap? = runCatching {
+        val width = 720
+        val height = 368
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val scale = maxOf(width.toFloat() / source.width, height.toFloat() / source.height)
+        val drawWidth = source.width * scale
+        val drawHeight = source.height * scale
+        val left = (width - drawWidth) / 2f
+        val top = (height - drawHeight) / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(
+            source,
+            null,
+            RectF(left, top, left + drawWidth, top + drawHeight),
+            paint,
+        )
+        canvas.drawColor(Color.argb(96, 38, 28, 72))
+        out
+    }.getOrNull()
 
     private fun attachMediaTransportActions(
         builder: NotificationCompat.Builder,

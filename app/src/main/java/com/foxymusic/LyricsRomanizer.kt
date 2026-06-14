@@ -20,6 +20,21 @@ object LyricsRomanizer {
         return runCatching {
             synchronized(transliterator) {
                 transliterator.transliterate(text)
+                    .replace("ṁ", "m")
+                    .replace("ṃ", "m")
+                    .replace("ṅ", "n")
+                    .replace("ñ", "ny")
+                    .replace("ś", "sh")
+                    .replace("ṣ", "sh")
+                    .replace("ā", "aa")
+                    .replace("ī", "ee")
+                    .replace("ū", "oo")
+                    .replace("ṛ", "ri")
+                    .replace("ḍ", "d")
+                    .replace("ṭ", "t")
+                    .replace("ṇ", "n")
+                    .replace("ḷ", "l")
+                    .replace(Regex("[`´’‘]"), "'")
                     .replace(Regex("\\s+"), " ")
                     .trim()
             }

@@ -108,11 +108,14 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         FoxySettings.init(applicationContext)
         FoxyAccount.init(applicationContext)
-        FoxyLibraryStore.init(applicationContext)
-        FoxyRecognitionHistory.init(applicationContext)
-        FoxyUserPlaylists.init(applicationContext)
-        MusicPlayer.init(applicationContext)
-        FoxyMedia3Downloads.ensureInitialized(applicationContext)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            FoxyLibraryStore.init(applicationContext)
+            FoxyRecognitionHistory.init(applicationContext)
+            FoxyUserPlaylists.init(applicationContext)
+            MusicPlayer.init(applicationContext)
+            FoxyMedia3Downloads.ensureInitialized(applicationContext)
+        }
 
         val b = FoxyFlutterBridge(this)
         bridge = b

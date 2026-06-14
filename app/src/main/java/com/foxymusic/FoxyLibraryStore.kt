@@ -57,6 +57,8 @@ object FoxyLibraryStore {
 
     /** All mutations hop to the main thread so Flutter reads stay consistent. */
     private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var lastDownloadsRefreshAtMs: Long = 0L
 
     private fun publish(reducer: (FoxyLibraryState) -> FoxyLibraryState) {
         fun apply() {
@@ -120,6 +122,7 @@ object FoxyLibraryStore {
      * Safe to call from any thread; disk IO runs on [Dispatchers.IO].
      */
     suspend fun refreshDownloadsFromDisk(context: Context) {
+        lastDownloadsRefreshAtMs = System.currentTimeMillis()
         publish { it.copy(isLoading = true) }
         val previous = state.value.downloadedSongs
         val local = withContext(Dispatchers.IO) { FoxyLocalMusic.all(context) }
@@ -151,6 +154,17 @@ object FoxyLibraryStore {
                 isLoading = false
             )
         }
+    }
+
+    suspend fun maybeRefreshDownloadsFromDisk(
+        context: Context,
+        minIntervalMs: Long = 12_000L,
+    ) {
+        val now = System.currentTimeMillis()
+        if (now - lastDownloadsRefreshAtMs < minIntervalMs) {
+            return
+        }
+        refreshDownloadsFromDisk(context)
     }
 
     fun toggleLiked(song: Song) {
