@@ -75,15 +75,13 @@ class _NowPlayingFooter extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        song.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      _OverflowMarqueeText(
+                        text: song.title,
                         style: const TextStyle(
-                          fontSize: 27,
+                          fontSize: 26,
                           fontWeight: FontWeight.w800,
-                          height: 0.96,
-                          letterSpacing: -0.5,
+                          height: 1.0,
+                          letterSpacing: -0.4,
                           color: Colors.white,
                         ),
                       ),

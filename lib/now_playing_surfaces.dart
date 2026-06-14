@@ -43,7 +43,7 @@ class _LyricsBackdropStage extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     Text(
-                      'Loading lyrics…',
+                      'Loading lyrics...',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.62),
                         fontWeight: FontWeight.w700,
@@ -59,10 +59,10 @@ class _LyricsBackdropStage extends StatelessWidget {
               child: Center(
                 child: _EmptyTabBody(
                   icon: Icons.subtitles_off_rounded,
-                  title: 'No lyrics found…',
+                  title: 'No lyrics found...',
                   subtitle: preferLrclib
-                      ? 'LRCLIB had no match — try turning off “Prefer LRCLIB” in Settings or ⋮ menu.'
-                      : 'YouTube captions had no match — try “Prefer LRCLIB” in Settings.',
+                      ? 'LRCLIB had no match - try turning off "Prefer LRCLIB" in Settings or the menu.'
+                      : 'YouTube captions had no match - try "Prefer LRCLIB" in Settings.',
                 ),
               ),
             )

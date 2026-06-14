@@ -1,22 +1,70 @@
-# Local Gradle homes / caches (large; do not commit)
-.gradle-user-home/
-.gradle-user-home*/
+# Local Gradle homes and caches
+.gradle/
+.gradle*/
+*-gradle-home/
+*-gradle-home*/
+cmd-gradle-home*/
+debug-home*/
+flutter-gradle-home/
+nested-gradle-home*/
+root-gradle-home/
+sp-gradle-home/
 .gradle-agent-home/
 .gradle-agent-home*/
 .gradle-build-isolated/
+.kotlin/
 
-# Build output & HTML reports (Gradle problems-report, etc. — not app source)
+# Build output
 build/
+app/build/
+app/.gradle/
 *.html
 
-# Extracted reference trees (not part of FoxyMusic)
-_simp_extract/
+# Flutter and IDE generated local state
+.dart_tool/
+.flutter-plugins-dependencies
+.android/
+.ios/
+.puro.json
+.vs/
+.vscode/
 
-# Release signing (never commit)
+# Temporary command/debug workspaces
+tmp/
+tmp*/
+cmd-tmp*/
+debug-tmp*/
+flutter-tmp*/
+root-tmp/
+sp-tmp/
+
+# Local diagnostics and screenshots
+*.log
+*.err
+*.out
+build-release-log.txt
+hs_err_pid*.log
+replay_pid*.log
+adb-screen.png
+foxy-screen.png
+foxy_screen.png
+_last_*.txt
+ytm_sample_renderer.txt
+showargs.cmd
+run-*.cmd
+run-*.bat
+
+# Extracted/reference trees that are not part of FoxyMusic
+_simp_extract/
+Metrolist-main/
+SimpMusic-main/
+foxy_flutter_ui/
+gradle-8.14/
+gradle814.zip
+.metrolist-study/
+.reference-SimpMusic-zip/
+
+# Release signing
 key.properties
 *.jks
 *.keystore
-
-# Third-party reference trees (not part of FoxyMusic)
-.metrolist-study/
-.reference-SimpMusic-zip/

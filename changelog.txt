@@ -1,0 +1,10 @@
+v1.2.2 (versionCode 6) - 1 June 2026
+-----------------------------------
+- Changed the red black theme to white/black and removed gradient home and fixed most of the Ui 
+- Added Ultra (loseless quality feature in settings tab),this can be felt in video -song playback ,use soundcloud first for best from the settings 
+- Bug fixes and improvements
+- Updated version display
+
+v1.2.1 (versionCode 5)
+----------------------
+- Previous changes...
