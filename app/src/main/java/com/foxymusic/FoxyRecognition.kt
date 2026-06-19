@@ -331,9 +331,9 @@ object FoxyRecognition {
         }
 
         val hub = track.optJSONObject("hub")
-        val appleMusicUrl = hub.optJSONArray("options").findProviderActionUri("apple")
-        val spotifyUrl = hub.optJSONArray("providers").findProviderActionUri("spotify")
-        youtubeVideoId = hub.optJSONArray("options").findYoutubeVideoId()
+        val appleMusicUrl = hub?.optJSONArray("options").findProviderActionUri("apple")
+        val spotifyUrl = hub?.optJSONArray("providers").findProviderActionUri("spotify")
+        youtubeVideoId = hub?.optJSONArray("options").findYoutubeVideoId()
 
         val images = track.optJSONObject("images")
         val coverArtUrl = images?.optString("coverart")?.trim().orEmpty().ifBlank { null }

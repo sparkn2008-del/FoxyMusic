@@ -40,6 +40,7 @@ class MainActivity : FlutterFragmentActivity() {
             }
             val path = FoxyHomeBackground.saveFromUri(applicationContext, uri)
             if (path != null) {
+                FoxySettings.update { it.copy(homeBackgroundEnabled = true) }
                 bridge?.emitAppearanceChanged()
                 pending.success(mapOf("ok" to true, "path" to path))
             } else {
@@ -140,6 +141,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     fun clearHomeBackground(result: MethodChannel.Result) {
         FoxyHomeBackground.clear(applicationContext)
+        FoxySettings.update { it.copy(homeBackgroundEnabled = false) }
         bridge?.emitAppearanceChanged()
         result.success(mapOf("ok" to true))
     }

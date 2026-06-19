@@ -40,9 +40,13 @@ data class Song(
 
     /** Best artwork URL with fallbacks */
     fun bestArtworkUrl(): String {
+        val art = artworkUrl.orEmpty()
+        val thumb = thumbnail.orEmpty()
         return when {
-            !artworkUrl.isNullOrBlank() -> upgradeYouTubeThumbSize(artworkUrl)
-            !thumbnail.isNullOrBlank() -> upgradeYouTubeThumbSize(thumbnail)
+            thumb.isNotBlank() && (art.isBlank() || art.isGeneratedYoutubePoster()) ->
+                upgradeYouTubeThumbSize(thumb)
+            art.isNotBlank() -> upgradeYouTubeThumbSize(art)
+            thumb.isNotBlank() -> upgradeYouTubeThumbSize(thumb)
             else -> youtubePosterCandidates().firstOrNull().orEmpty()
         }
     }
@@ -55,9 +59,9 @@ data class Song(
     }
 
     private fun youtubePosterCandidates(): List<String> = listOf(
-        "https://img.youtube.com/vi/$videoId/maxresdefault.jpg",
+        "https://img.youtube.com/vi/$videoId/hqdefault.jpg",
         "https://img.youtube.com/vi/$videoId/sddefault.jpg",
-        "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+        "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
     )
 
     private fun upgradeYouTubeThumbSize(url: String): String {
@@ -70,17 +74,20 @@ data class Song(
             .replace("=w88-h88", "=w800-h800")
             .replace("=w120-h120", "=w800-h800")
             .replace("=w360-h360", "=w800-h800")
-        u = u.replace(Regex("""/(hqdefault|mqdefault|default)\.jpg"""), "/maxresdefault.jpg")
         return u
     }
+
+    private fun String.isGeneratedYoutubePoster(): Boolean =
+        contains("img.youtube.com/vi/") || contains("i.ytimg.com/vi/")
 
     /** Multiple artwork candidates for better quality selection */
     fun artworkCandidates(): List<String> {
         return listOfNotNull(
             artworkUrl,
             thumbnail,
-            "https://img.youtube.com/vi/$videoId/maxresdefault.jpg",
-            "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+            "https://img.youtube.com/vi/$videoId/hqdefault.jpg",
+            "https://img.youtube.com/vi/$videoId/sddefault.jpg",
+            "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
         ).filter { it.isNotBlank() }
     }
 

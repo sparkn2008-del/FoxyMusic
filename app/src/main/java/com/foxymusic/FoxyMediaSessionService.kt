@@ -24,7 +24,6 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -40,7 +39,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.min
 
-@OptIn(UnstableApi::class)
 /**
  * Media3 session service — rich media-style notification (Foxy / YT Music–style shade card)
  * wired to ExoPlayer in [MusicPlayer].
@@ -206,6 +204,7 @@ class FoxyMediaSessionService : MediaSessionService() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openAppPendingIntent())
 
         FoxyDynamicTheme.accent.value?.let { composeColor ->
             runCatching {
@@ -223,8 +222,7 @@ class FoxyMediaSessionService : MediaSessionService() {
             attachMediaTransportActions(b, session)
             b.setStyle(
                 MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(0, 1, 2)
-                    .setShowCancelButton(true),
+                    .setShowActionsInCompactView(0, 1, 2),
             )
         }
 
@@ -268,6 +266,12 @@ class FoxyMediaSessionService : MediaSessionService() {
         views.setTextViewText(R.id.notif_title, title)
         views.setTextViewText(R.id.notif_artist, artist)
         views.setTextViewText(R.id.notif_device, "This phone")
+        val openApp = openAppPendingIntent()
+        views.setOnClickPendingIntent(R.id.notif_root, openApp)
+        views.setOnClickPendingIntent(R.id.notif_artwork_bg, openApp)
+        views.setOnClickPendingIntent(R.id.notif_title, openApp)
+        views.setOnClickPendingIntent(R.id.notif_artist, openApp)
+        views.setOnClickPendingIntent(R.id.notif_device, openApp)
 
         val playPauseIcon =
             if (ui.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
@@ -361,6 +365,20 @@ class FoxyMediaSessionService : MediaSessionService() {
         return PendingIntent.getService(
             this,
             command,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun openAppPendingIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            this,
+            9001,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

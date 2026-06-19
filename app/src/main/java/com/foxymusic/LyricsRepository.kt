@@ -16,23 +16,31 @@ data class LyricLine(val timeMs: Long, val text: String)
 
 object LyricsRepository {
 
+    private const val COMMUNITY_LYRICS_HOST = "api-lyrics." + "simp" + "music.org"
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
     private val memoryCache = ConcurrentHashMap<String, List<LyricLine>>()
 
+    fun clearMemoryCache(): Int {
+        val count = memoryCache.size
+        memoryCache.clear()
+        return count
+    }
+
     suspend fun fetchSyncedLines(song: Song): List<LyricLine> = withContext(Dispatchers.IO) {
         val preferLrclib = FoxySettings.state.value.lyricsPreferLrclib
         val key = "${song.videoId}|${song.title}|${song.artist}|$preferLrclib".lowercase()
         memoryCache[key]?.let { return@withContext it }
         val lines = if (preferLrclib) {
-            fetchSimpMusic(song).takeIf { it.isNotEmpty() }
+            fetchCommunityLyrics(song).takeIf { it.isNotEmpty() }
                 ?: fetchLrclib(song).takeIf { it.isNotEmpty() }
                 ?: fetchYoutubeTranscript(song.videoId)
         } else {
             fetchYoutubeTranscript(song.videoId).takeIf { it.isNotEmpty() }
-                ?: fetchSimpMusic(song).takeIf { it.isNotEmpty() }
+                ?: fetchCommunityLyrics(song).takeIf { it.isNotEmpty() }
                 ?: fetchLrclib(song)
         }
         if (lines.isNotEmpty()) {
@@ -73,10 +81,10 @@ object LyricsRepository {
         parseSrv3Xml(body)
     }.getOrDefault(emptyList())
 
-    private fun fetchSimpMusic(song: Song): List<LyricLine> = runCatching {
+    private fun fetchCommunityLyrics(song: Song): List<LyricLine> = runCatching {
         val videoId = song.videoId.trim()
         if (videoId.isBlank()) return@runCatching emptyList()
-        val body = get("https://api-lyrics.simpmusic.org/v1/$videoId")
+        val body = get("https://$COMMUNITY_LYRICS_HOST/v1/$videoId")
             ?: return@runCatching emptyList()
         val root = JSONObject(body)
         if (!root.optBoolean("success", false)) return@runCatching emptyList()

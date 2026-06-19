@@ -14,7 +14,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.datasource.DefaultDataSource
@@ -131,7 +130,7 @@ object MusicPlayer {
     private const val PRELOAD_LEAD_MS = 75_000L
     /** Foxy: prefetch more radio tracks when this many queue items remain. */
     private const val RADIO_LOAD_MORE_THRESHOLD = 5
-    /** Chronological play order for back (previous track), SimpMusic-style. */
+    /** Chronological play order for back (previous track), Foxy-style. */
     private val playbackTimeline = mutableListOf<Song>()
     private var playbackTimelineIndex = -1
     @Volatile
@@ -249,7 +248,6 @@ object MusicPlayer {
      * Dynamic LoadControl tuned for YouTube audio streams.
      * Adapts buffer sizes based on WiFi vs Mobile + metered status.
      */
-    @OptIn(UnstableApi::class)
     private fun createDynamicLoadControl(context: Context): LoadControl {
         val connectivityManager = context.getSystemService<ConnectivityManager>()
         val network = connectivityManager?.activeNetwork
@@ -306,7 +304,7 @@ object MusicPlayer {
             .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
             .build()
     }
-    /** SimpMusic-style target level when normalization is enabled (reduces hot masters). */
+    /** Foxy-style target level when normalization is enabled (reduces hot masters). */
     private fun effectiveUserVolume(): Float {
         var level = userVolume
         if (FoxySettings.state.value.normalizeVolume) {
@@ -1724,7 +1722,6 @@ object MusicPlayer {
         }
     }
 
-    @OptIn(UnstableApi::class)
     private fun syncMediaSession(context: Context) {
         val p = player ?: return
         if (mediaSessionHolder == null) {

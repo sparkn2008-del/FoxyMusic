@@ -21,7 +21,7 @@ data class FoxyCustomization(
     val playerProgressStyle: Int = 0,
     /** Legacy: unused. */
     val playerSeekMotion: Int = 0,
-    /** 0 = blurred artwork, 1 = dark gradient, 2 = solid black, 3 = unblurred artwork. */
+    /** 0 = blurred artwork, 1 = unblurred artwork, 2 = solid black, 3 = video clip. */
     val playerBackgroundStyle: Int = 0,
     /** 0 = classic controls, 1 = reserved, 2 = top action cluster. */
     val playerStyle: Int = 0,
@@ -174,7 +174,7 @@ object FoxySettings {
                 prefs.getInt(PLAYER_PROGRESS_STYLE, 0),
             ),
             playerSeekMotion = 0,
-            playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 2),
+            playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 3),
             playerStyle = prefs.getInt(PLAYER_STYLE, 0).coerceIn(0, 2),
             playerButtonsStyle = prefs.getInt(PLAYER_BUTTONS_STYLE, 0).coerceIn(0, 2),
             playerArtworkShape = prefs.getInt(PLAYER_ARTWORK_SHAPE, 0).coerceIn(0, 2),
@@ -235,7 +235,7 @@ object FoxySettings {
                 normalizePlayerProgressStyle(next.playerProgressStyle),
             )
             ?.putInt(PLAYER_SEEK_MOTION, 0)
-            ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 2))
+            ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 3))
             ?.putInt(PLAYER_STYLE, next.playerStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_BUTTONS_STYLE, next.playerButtonsStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_ARTWORK_SHAPE, next.playerArtworkShape.coerceIn(0, 2))

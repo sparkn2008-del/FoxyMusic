@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.LinkedHashMap
 import java.net.URLDecoder
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -80,6 +81,11 @@ object StreamExtractor {
 
     @Volatile
     private var httpClient: OkHttpClient? = null
+
+    private val videoClipResultCache = object : LinkedHashMap<String, StreamResult>(48, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StreamResult>?): Boolean =
+            size > 48
+    }
 
     private fun httpClient(): OkHttpClient {
         val s = FoxySettings.state.value
@@ -349,11 +355,21 @@ object StreamExtractor {
         artist: String? = null,
     ): StreamResult {
         val maxHeight = targetHeight.coerceIn(240, 1080)
+        val cacheKey = listOf(videoId.trim(), maxHeight, title.orEmpty().trim(), artist.orEmpty().trim())
+            .joinToString("|")
+        synchronized(videoClipResultCache) {
+            videoClipResultCache[cacheKey]?.let { return it.copy(source = it.source ?: "clip-cache") }
+        }
         val extractorErrors = mutableListOf<String>()
         val clientOrder = clientsForTier(0)
         for (ytClient in clientOrder) {
             val attempt = tryInnertubeVideoClient(videoId, ytClient, maxHeight)
-            if (attempt.url != null) return attempt
+            if (attempt.url != null) {
+                synchronized(videoClipResultCache) {
+                    videoClipResultCache[cacheKey] = attempt
+                }
+                return attempt
+            }
             attempt.error?.let { extractorErrors += it }
         }
 
@@ -368,7 +384,12 @@ object StreamExtractor {
             if (candidateId.isBlank() || candidateId == videoId) continue
             for (ytClient in clientOrder) {
                 val attempt = tryInnertubeVideoClient(candidateId, ytClient, maxHeight)
-                if (attempt.url != null) return attempt
+                if (attempt.url != null) {
+                    synchronized(videoClipResultCache) {
+                        videoClipResultCache[cacheKey] = attempt
+                    }
+                    return attempt
+                }
                 attempt.error?.let { extractorErrors += "Related candidate " + candidateId + ": " + it }
             }
         }
@@ -592,10 +613,10 @@ object StreamExtractor {
     }
 
     private fun qualityPreferenceForTier(tier: Int): QualityPreference = when (tier) {
-        0 -> QualityPreference(maxBitrate = 96_000, targetBitrate = 64_000)
-        1 -> QualityPreference(maxBitrate = 112_000, targetBitrate = 96_000)
-        2 -> QualityPreference(maxBitrate = 160_000, targetBitrate = 128_000)
-        3 -> QualityPreference(maxBitrate = 320_000, targetBitrate = 256_000)
+        0 -> QualityPreference(maxBitrate = 96_000, targetBitrate = 48_000)
+        1 -> QualityPreference(maxBitrate = 160_000, targetBitrate = 128_000)
+        2 -> QualityPreference(maxBitrate = 256_000, targetBitrate = 220_000)
+        3 -> QualityPreference(maxBitrate = 360_000, targetBitrate = 320_000)
         else -> QualityPreference(maxBitrate = null, targetBitrate = 1_000_000)
     }
 
@@ -683,8 +704,15 @@ object StreamExtractor {
     ): Int {
         val bitrate = optInt("bitrate", 0)
         if (tier >= 4) {
-            val ultraFloorBonus = if (bitrate >= 320_000) 250_000 else 0
-            return codecScore() * 1_000_000 + bitrate + ultraFloorBonus
+            val preferredCodecBonus = when {
+                optString("mimeType").contains("flac", ignoreCase = true) -> 3_000_000
+                optString("mimeType").contains("opus", ignoreCase = true) -> 2_400_000
+                optString("mimeType").contains("aac", ignoreCase = true) ||
+                    optString("mimeType").contains("mp4a", ignoreCase = true) -> 2_000_000
+                else -> 0
+            }
+            val ultraFloorBonus = if (bitrate >= 320_000) 100_000_000 else 0
+            return ultraFloorBonus + preferredCodecBonus + codecScore() * 100_000 + bitrate
         }
         if (bitrate <= 0) return 0
         val target = preference.targetBitrate ?: return bitrate

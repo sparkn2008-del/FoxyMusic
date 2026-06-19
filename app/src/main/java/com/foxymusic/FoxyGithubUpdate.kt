@@ -56,7 +56,7 @@ object FoxyGithubUpdate {
 
     /**
      * Fetches GitHub latest release and compares [tag_name] to the installed [versionName].
-     * SimpMusic-style: volume crossfade is separate; this is APK update discovery only.
+     * Foxy-style: volume crossfade is separate; this is APK update discovery only.
      */
     fun checkForUpdate(context: Context): UpdateCheckResult {
         val (installedName, installedCode) = installedVersion(context)

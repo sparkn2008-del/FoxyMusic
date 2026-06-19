@@ -42,8 +42,6 @@ Notable events: `playerState`, `appearanceChanged`, `updateAvailable`, `libraryF
 | File | Role |
 |------|------|
 | `lib/main.dart` | Primary UI shell |
-| `lib/now_playing_footer.dart` | Alternate player footer |
-| `lib/now_playing_surfaces.dart` | Full lyrics list |
 | `lib/foxy_startup_splash.dart` | Animated splash |
 
 ---

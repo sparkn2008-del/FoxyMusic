@@ -66,6 +66,7 @@ object AudioResampler {
                 decodedAudio.pcmEncoding
             )
             val outputFormat = sonic.configure(inputFormat)
+            @Suppress("DEPRECATION")
             sonic.flush()
 
             val inputBuf = ByteBuffer.wrap(decodedAudio.data).order(ByteOrder.nativeOrder())

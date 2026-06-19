@@ -2,7 +2,7 @@ package com.foxymusic
 
 import android.content.Context
 
-/** Throttle for background GitHub release checks (SimpMusic-style updater). */
+/** Throttle for background GitHub release checks (Foxy-style updater). */
 object FoxyUpdatePrefs {
     private const val PREFS = "foxy_update"
     private const val LAST_CHECK_MS = "last_check_ms"

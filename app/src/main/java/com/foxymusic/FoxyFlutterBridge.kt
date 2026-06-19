@@ -5,12 +5,15 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.media.audiofx.AudioEffect
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -23,7 +26,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.Collections
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -31,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.graphics.toArgb
 import org.json.JSONArray
 
+@OptIn(FlowPreview::class)
 class FoxyFlutterBridge(
     private val context: Context
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
@@ -515,7 +523,7 @@ class FoxyFlutterBridge(
                         playerProgressStyle = playerProgressStyle?.let { if (it == 1) 1 else 0 }
                             ?: current.playerProgressStyle,
                         playerSeekMotion = 0,
-                        playerBackgroundStyle = playerBackgroundStyle?.coerceIn(0, 2)
+                        playerBackgroundStyle = playerBackgroundStyle?.coerceIn(0, 3)
                             ?: current.playerBackgroundStyle,
                         playerStyle = playerStyle?.coerceIn(0, 2)
                             ?: current.playerStyle,
@@ -729,10 +737,32 @@ class FoxyFlutterBridge(
                     scope.launch {
                         val payload = runCatching {
                             withContext(Dispatchers.IO) {
-                                YTMusicApi.searchAll(query, limit).mapValues { (key, list) ->
-                                        val filtered = list.filter { it.videoId.isNotBlank() }
-                                    filtered.map { it.toFlutterMap() }
-                                }
+                                val categorized = YTMusicApi.searchAll(query, limit)
+                                val artistRows = YTMusicApi.searchArtistProfiles(query, limit)
+                                    .map { artist ->
+                                        Song(
+                                            videoId = artist.browseId.ifBlank { artist.name },
+                                            title = artist.name,
+                                            artist = artist.subscribers ?: "Artist",
+                                            thumbnail = artist.thumbnail,
+                                            artworkUrl = artist.thumbnail,
+                                        )
+                                    }
+                                    .filter { it.videoId.isNotBlank() && it.title.isNotBlank() }
+                                    .distinctBy { it.videoId }
+                                    .take(limit)
+                                mapOf(
+                                    "songs" to categorized["songs"].orEmpty()
+                                        .filter { it.videoId.isNotBlank() }
+                                        .map { it.toFlutterMap() },
+                                    "videos" to categorized["videos"].orEmpty()
+                                        .filter { it.videoId.isNotBlank() }
+                                        .map { it.toFlutterMap() },
+                                    "albums" to categorized["albums"].orEmpty()
+                                        .filter { it.videoId.isNotBlank() }
+                                        .map { it.toFlutterMap() },
+                                    "artists" to artistRows.map { it.toFlutterMap() },
+                                )
                             }
                         }
                         payload.onSuccess(result::success)
@@ -771,6 +801,9 @@ class FoxyFlutterBridge(
                 scope.launch {
                     val payload = runCatching {
                         withContext(Dispatchers.IO) {
+                            if (!hasHomeFeedInternet(context)) {
+                                throw UnknownHostException("No internet connection")
+                            }
                             val byTitle = LinkedHashMap<String, RecommendationSection>()
                             val seenVideoIds = LinkedHashSet<String>()
                             fun isSuppressedHomeSection(title: String): Boolean {
@@ -794,101 +827,313 @@ class FoxyFlutterBridge(
                                     }
                                 }
                             }
-                            if (mood != null) {
-                                addAll(
-                                    listOf(
-                                        RecommendationSection(
-                                            "${mood.replaceFirstChar { it.titlecase(Locale.US) }} radio",
-                                            YTMusicApi.getMoodMix(mood).take(24),
-                                        ),
-                                        RecommendationSection(
-                                            "More ${mood.lowercase(Locale.US)}",
-                                            YTMusicApi.search("$mood songs mix").take(18),
-                                        ),
-                                    ),
+                            suspend fun searchSection(title: String, query: String, limit: Int = 18) =
+                                RecommendationSection(
+                                    title,
+                                    withTimeoutOrNull(2_400) {
+                                        YTMusicApi.search(query)
+                                    }.orEmpty().take(limit),
                                 )
+                            suspend fun categorySections(seed: String): List<RecommendationSection> {
+                                val normalized = seed.lowercase(Locale.US)
+                                val pairs = when (normalized) {
+                                    "moods" -> listOf(
+                                        "Relax" to "relaxing songs chill mix",
+                                        "Sleep" to "sleep music soft songs",
+                                        "Focus" to "focus music deep work songs",
+                                        "Workout" to "workout energetic songs",
+                                        "Party" to "party hits dance songs",
+                                        "Romance" to "romantic songs love hits",
+                                    )
+                                    "genres" -> listOf(
+                                        "Bollywood" to "bollywood hits songs",
+                                        "Punjabi" to "punjabi hits songs",
+                                        "Indie" to "indie pop songs",
+                                        "Pop" to "pop hits songs",
+                                        "Hip-Hop" to "hip hop rap hits",
+                                        "Electronic" to "electronic dance music songs",
+                                        "Rock" to "rock hits songs",
+                                    )
+                                    "charts" -> listOf(
+                                        "India top songs" to "india top songs today",
+                                        "Global top songs" to "global top songs today",
+                                        "Viral hits" to "viral songs trending now",
+                                        "YouTube charts" to "youtube music charts songs",
+                                        "New releases" to "new release songs this week",
+                                    )
+                                    "radio" -> listOf(
+                                        "Foxy Radio" to "top songs radio mix",
+                                        "Bollywood Radio" to "bollywood radio hits",
+                                        "Punjabi Radio" to "punjabi radio hits",
+                                        "Chill Radio" to "chill radio songs",
+                                        "Throwback Radio" to "throwback radio hits",
+                                    )
+                                    else -> listOf(
+                                        seed.replaceFirstChar { it.titlecase(Locale.US) } to "$seed songs mix",
+                                        "More ${seed.lowercase(Locale.US)}" to "$seed playlist songs",
+                                    )
+                                }
+                                return pairs.map { (title, query) -> searchSection(title, query) }
+                            }
+                            suspend fun broadCategoryShelves(): List<RecommendationSection> {
+                                val pairs = listOf(
+                                    "Phonk" to "phonk songs",
+                                    "Classic hits" to "classic hits songs",
+                                    "Old is gold" to "old hindi songs classics",
+                                    "Acoustic" to "acoustic songs unplugged",
+                                    "Lo-fi" to "lofi songs chill",
+                                    "Devotional" to "devotional songs bhajan",
+                                    "Romantic hits" to "romantic hits songs",
+                                )
+                                return pairs.map { (title, query) -> searchSection(title, query, 16) }
+                            }
+                            suspend fun featuredArtistSongs(): List<Song> {
+                                val names = listOf(
+                                    "Ed Sheeran",
+                                    "The Weeknd",
+                                    "Taylor Swift",
+                                    "Arijit Singh",
+                                    "Anuv Jain",
+                                    "Dua Lipa",
+                                    "Bruno Mars",
+                                    "Billie Eilish",
+                                    "Diljit Dosanjh",
+                                    "Ariana Grande",
+                                )
+                                return names.map { name ->
+                                    async {
+                                        withTimeoutOrNull(1_800) {
+                                            YTMusicApi.searchArtistProfiles(name, 1).firstOrNull()
+                                        }?.let { artist ->
+                                            Song(
+                                                videoId = artist.browseId.ifBlank { artist.name },
+                                                title = artist.name,
+                                                artist = artist.subscribers ?: "Artist",
+                                                thumbnail = artist.thumbnail,
+                                                artworkUrl = artist.thumbnail,
+                                            )
+                                        }
+                                    }
+                                }.awaitAll()
+                                    .filterNotNull()
+                                    .filter { it.videoId.isNotBlank() && it.title.isNotBlank() }
+                                    .distinctBy { it.videoId }
                             }
                             val library = FoxyLibraryStore.state.value
+                            if (mood != null) {
+                                val moodKey = mood.lowercase(Locale.US)
+                                when (moodKey) {
+                                    "downloaded" -> {
+                                        val downloaded = library.downloadedSongs.asReversed().take(24)
+                                        addAll(
+                                            listOf(
+                                                RecommendationSection("Downloaded", downloaded),
+                                                RecommendationSection(
+                                                    "Offline replay",
+                                                    downloaded.shuffled().take(18),
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                    "history" -> {
+                                        val history = library.historySongs.take(24)
+                                        addAll(
+                                            listOf(
+                                                RecommendationSection("History", history),
+                                                RecommendationSection(
+                                                    "Recently played",
+                                                    history.drop(6).take(18),
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                    "moods", "genres", "charts", "radio" -> {
+                                        addAll(categorySections(moodKey))
+                                    }
+                                    else -> {
+                                        addAll(
+                                            listOf(
+                                                RecommendationSection(
+                                                    "${mood.replaceFirstChar { it.titlecase(Locale.US) }} radio",
+                                                    YTMusicApi.getMoodMix(mood).take(24),
+                                                ),
+                                                RecommendationSection(
+                                                    "More ${mood.lowercase(Locale.US)}",
+                                                    YTMusicApi.search("$mood songs mix").take(18),
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
                             if (params == null && mood == null) {
                                 val historyIds = library.historySongs.map { it.videoId }.toHashSet()
-                                val replayed = library.mostPlayedFromHistory().take(18)
                                 val resume = library.historySongs.take(18)
                                 val offline = library.downloadedSongs
                                     .asReversed()
                                     .filterNot { historyIds.contains(it.videoId) }
                                     .ifEmpty { library.downloadedSongs.asReversed() }
                                     .take(18)
-                                addAll(
-                                    listOf(
-                                        RecommendationSection("Resume your vibe", resume),
-                                    ),
-                                )
-                                val chartEarly =
-                                    runCatching { YTMusicApi.chartsSections() }
-                                        .getOrElse { emptyList() }
-                                        .firstOrNull {
-                                            it.title.contains("chart", ignoreCase = true)
-                                        }
-                                        ?: RecommendationSection(
-                                            "Charting now",
-                                            YTMusicApi.search("billboard hot 100 songs").take(14),
+                                if (resume.isNotEmpty()) {
+                                    addAll(listOf(RecommendationSection("Listen again", resume)))
+                                }
+                                if (offline.isNotEmpty()) {
+                                    addAll(listOf(RecommendationSection("Downloaded but forgotten", offline)))
+                                }
+                            }
+                            val recentSeed = if (params == null && mood == null) {
+                                library.historySongs.firstOrNull()
+                            } else {
+                                null
+                            }
+                            val foxyDiscoveryJobs = if (params == null && mood == null) {
+                                listOf(
+                                    async {
+                                        recentSeed?.let { seed ->
+                                            listOf(
+                                                RecommendationSection(
+                                                    "Because you played ${seed.title}",
+                                                    withTimeoutOrNull(2_500) {
+                                                        YTMusicApi.radio(seed)
+                                                    }.orEmpty().drop(1).take(16),
+                                                ),
+                                            )
+                                        } ?: emptyList()
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Trending now",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("trending songs today")
+                                                }.orEmpty().take(16),
+                                            ),
                                         )
-                                addAll(listOf(chartEarly))
-                                addAll(
-                                    listOf(
-                                        RecommendationSection("Most replayed", replayed),
-                                        RecommendationSection("Downloaded but forgotten", offline),
-                                    ),
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Featured artists",
+                                                featuredArtistSongs(),
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Categories",
+                                                broadCategoryShelves().flatMap { section ->
+                                                    section.songs.take(2)
+                                                },
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        broadCategoryShelves()
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Bollywood radar",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("bollywood trending songs")
+                                                }.orEmpty().take(16),
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Punjabi heat",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("punjabi trending songs")
+                                                }.orEmpty().take(16),
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Indie discovery",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("indie pop discovery songs")
+                                                }.orEmpty().take(16),
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Focus flow",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("focus chill electronic songs")
+                                                }.orEmpty().take(16),
+                                            ),
+                                        )
+                                    },
+                                    async {
+                                        listOf(
+                                            RecommendationSection(
+                                                "Throwback radio",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("throwback hits songs")
+                                                }.orEmpty().take(16),
+                                            ),
+                                        )
+                                    },
                                 )
+                            } else {
+                                emptyList()
                             }
                             val discoveryJobs = listOf(
                                 async {
-                                    runCatching { YTMusicApi.homeRecommendations(params) }
+                                    runCatching {
+                                        withTimeoutOrNull(3_200) {
+                                            YTMusicApi.homeRecommendations(params)
+                                        }.orEmpty()
+                                    }
                                         .getOrElse { emptyList() }
                                 },
                                 async {
-                                    listOf(
-                                        RecommendationSection(
-                                            "Today on Foxy",
-                                            YTMusicApi.search("top songs today global").take(18),
-                                        ),
-                                        RecommendationSection(
-                                            "India pulse",
-                                            YTMusicApi.search("india trending songs hindi punjabi bollywood").take(18),
-                                        ),
-                                    )
+                                    if (params == null && mood == null) {
+                                        listOf(
+                                            RecommendationSection(
+                                                "New releases",
+                                                withTimeoutOrNull(2_200) {
+                                                    YTMusicApi.search("new release songs this week")
+                                                }.orEmpty().take(18),
+                                            ),
+                                        )
+                                    } else {
+                                        emptyList()
+                                    }
                                 },
                                 async {
-                                    listOf(
-                                        RecommendationSection(
-                                            "New releases",
-                                            YTMusicApi.search("new release songs this week").take(18),
-                                        ),
-                                        RecommendationSection(
-                                            "Hidden gems",
-                                            YTMusicApi.search("underrated indie pop electronic songs").take(18),
-                                        ),
-                                        RecommendationSection(
-                                            "High quality picks",
-                                            YTMusicApi.search("official audio high quality songs").take(18),
-                                        ),
-                                    )
+                                    if (params == null && mood == null) {
+                                        val chartEarly =
+                                            runCatching { YTMusicApi.chartsSections() }
+                                                .getOrElse { emptyList() }
+                                                .firstOrNull {
+                                                    it.title.contains("chart", ignoreCase = true)
+                                                }
+                                                ?: RecommendationSection(
+                                                    "Charts",
+                                                    withTimeoutOrNull(2_200) {
+                                                        YTMusicApi.search("billboard hot 100 songs")
+                                                    }.orEmpty().take(14),
+                                                )
+                                        listOf(chartEarly)
+                                    } else {
+                                        emptyList()
+                                    }
                                 },
-                                async {
-                                    listOf(
-                                        RecommendationSection(
-                                            "Covers and remixes",
-                                            YTMusicApi.search("popular covers remixes songs").take(18),
-                                        ),
-                                    )
-                                },
-                            )
+                            ) + foxyDiscoveryJobs
                             discoveryJobs.awaitAll().forEach(::addAll)
                             if (byTitle.isEmpty()) {
                                 addAll(
                                     listOf(
                                         RecommendationSection(
-                                            "Trending now",
+                                            "Quick picks",
                                             YTMusicApi.search("top songs today").take(16),
                                         ),
                                     ).filter { it.songs.isNotEmpty() },
@@ -897,22 +1142,24 @@ class FoxyFlutterBridge(
                             fun layoutFor(title: String): String {
                                 val t = title.lowercase(Locale.US)
                                 return when {
+                                    t.contains("quick pick") -> "cards"
                                     t.contains("foxy mix") -> "mixes"
                                     t.contains("radio") || t.contains("starter") -> "square"
                                     t.contains("video") -> "video"
-                                    t.contains("resume") || t.contains("replayed") ||
+                                    t.contains("listen again") || t.contains("resume") || t.contains("replayed") ||
                                         t.contains("downloaded") -> "square"
-                                    t.contains("today on foxy") || t.contains("india pulse") ||
-                                        t.contains("gem") || t.contains("quality") ||
-                                        t.contains("release") || t.contains("discover") ||
-                                        t.contains("cover") || t.contains("remix") ||
-                                        t.contains("daily") || t.contains("fresh") -> "grid"
+                                    t.contains("release") || t.contains("discover") ||
+                                        t.contains("daily") || t.contains("fresh") -> "square"
                                     t.contains("charting") || t.contains("trending") -> "chart"
                                     t.contains("artist") || t.contains("similar") -> "artist"
-                                    else -> "cards"
+                                    t.contains("categories") -> "cards"
+                                    t.contains("phonk") || t.contains("classic") || t.contains("old is gold") ||
+                                        t.contains("acoustic") || t.contains("lo-fi") || t.contains("devotional") ||
+                                        t.contains("romantic hits") -> "square"
+                                    else -> "square"
                                 }
                             }
-                            val sections = byTitle.values.take(18).map { sec ->
+                            val sections = byTitle.values.take(24).map { sec ->
                                 mapOf(
                                     "title" to sec.title,
                                     "layout" to layoutFor(sec.title),
@@ -931,7 +1178,13 @@ class FoxyFlutterBridge(
                         }
                     }
                     payload.onSuccess(result::success)
-                        .onFailure { result.error("home_failed", it.message ?: "Home feed failed", null) }
+                        .onFailure {
+                            result.error(
+                                "home_failed",
+                                homeFeedErrorMessage(it),
+                                null,
+                            )
+                        }
                 }
             }
             FoxyFlutterChannels.Methods.MOOD_MIX -> {
@@ -1022,7 +1275,7 @@ class FoxyFlutterBridge(
                     scheduleFlutterPlayerStatePush(includeQueue = true)
                 }
             }
-            
+
             FoxyFlutterChannels.Methods.SKIP_TO_QUEUE_INDEX -> {
                 val index = (call.argument<Number>("index")?.toInt() ?: 0).coerceAtLeast(0)
                 FoxyPlayerConnection.skipToQueueIndex(context, index)
@@ -1190,6 +1443,10 @@ class FoxyFlutterBridge(
                     }
                     result.success(payload)
                 }
+            }
+            "clearLyricsCache" -> {
+                val cleared = LyricsRepository.clearMemoryCache()
+                result.success(mapOf("ok" to true, "clearedEntries" to cleared))
             }
             "refreshDownloads" -> {
                 scope.launch {
@@ -1455,23 +1712,27 @@ class FoxyFlutterBridge(
                 if (videoId.isBlank()) {
                     result.error("bad_args", "Missing videoId", null)
                 } else {
-                    val clip = StreamExtractor.getVideoClipResult(
-                        videoId = videoId,
-                        title = title,
-                        artist = artist,
-                    )
-                    result.success(
-                        mapOf(
-                            "url" to clip.url,
-                            "source" to clip.source,
-                            "bitrate" to clip.bitrate,
-                            "codec" to clip.codec,
-                            "mimeType" to clip.mimeType,
-                            "itag" to clip.itag,
-                            "qualityLabel" to clip.qualityLabel,
-                            "error" to clip.error,
-                        ),
-                    )
+                    scope.launch {
+                        val clip = withContext(Dispatchers.IO) {
+                            StreamExtractor.getVideoClipResult(
+                                videoId = videoId,
+                                title = title,
+                                artist = artist,
+                            )
+                        }
+                        result.success(
+                            mapOf(
+                                "url" to clip.url,
+                                "source" to clip.source,
+                                "bitrate" to clip.bitrate,
+                                "codec" to clip.codec,
+                                "mimeType" to clip.mimeType,
+                                "itag" to clip.itag,
+                                "qualityLabel" to clip.qualityLabel,
+                                "error" to clip.error,
+                            ),
+                        )
+                    }
                 }
             }
             else -> result.notImplemented()
@@ -1734,6 +1995,30 @@ private val localUserPlaylistIdRegex =
 
 private fun isLocalUserPlaylistId(id: String): Boolean = localUserPlaylistIdRegex.matches(id)
 
+private fun hasHomeFeedInternet(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return true
+    val network = cm.activeNetwork ?: return false
+    val caps = cm.getNetworkCapabilities(network) ?: return false
+    if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return false
+    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
+private fun homeFeedErrorMessage(error: Throwable): String {
+    val networkFailure =
+        error is UnknownHostException ||
+            error is SocketTimeoutException ||
+            error is IOException ||
+            error.cause is UnknownHostException ||
+            error.cause is SocketTimeoutException ||
+            error.cause is IOException
+    return if (networkFailure) {
+        "No internet connection"
+    } else {
+        error.message ?: "Home feed failed"
+    }
+}
+
 private fun Map<String, Any?>.toSongOrNull(): Song? {
     val videoId = this["videoId"]?.toString()?.trim().orEmpty()
     if (videoId.isBlank()) return null
@@ -1770,7 +2055,7 @@ private fun Song.toFlutterMap(ctx: Context? = FoxyFlutterBridge.applicationConte
 }
 
 /**
- * Respects [FoxySettings.lyricsPreferLrclib] (SimpMusic-style source order).
+ * Respects [FoxySettings.lyricsPreferLrclib] (Foxy-style source order).
  * Does not return stale offline cache ahead of a live LRCLIB/YouTube fetch.
  */
 private suspend fun fetchLyricsForUi(context: Context, song: Song): List<Map<String, Any>> {
@@ -1931,7 +2216,7 @@ private suspend fun resolveArtistProfilePayload(
     fun rankSongs(items: List<Song>): List<Song> =
         items
             .filter { it.videoId.isNotBlank() }
-            .filter { artistSongScore(it, cleanArtist) >= 0 }
+            .filter { artistSongScore(it, cleanArtist) > 0 }
             .distinctBy { it.videoId }
             .sortedByDescending { artistSongScore(it, cleanArtist) }
 

@@ -128,16 +128,17 @@ internal object YtmQueueParser {
             ?.takeIf { YtmMusicFilter.isDurationLike(it) }
         val album = parseLongBylineAlbum(renderer)
         val thumbnail = findThumbnailInRenderer(renderer)
-        val poster = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
+        val fallbackPoster = "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+        val artwork = thumbnail.ifBlank { fallbackPoster }
 
         return Song(
             videoId = videoId,
             title = title,
             artist = artist,
-            thumbnail = thumbnail.ifBlank { poster },
+            thumbnail = artwork,
             duration = duration,
             album = album,
-            artworkUrl = poster,
+            artworkUrl = artwork,
         )
     }
 

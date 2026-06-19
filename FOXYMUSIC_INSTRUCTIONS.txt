@@ -1,241 +1,704 @@
-FoxyMusic — Maintainer & Agent Instructions
-==========================================
+FoxyMusic - Maintainer & Agent Blueprint
+========================================
 
 Repository : https://github.com/sparkn2008-del/FoxyMusic
-Stack       : Android (Kotlin + Media3) + Flutter UI (repo-root module)
-Package     : com.foxymusic
-Current     : versionName 1.3.0 · versionCode 7
+Stack      : Android Kotlin + Media3 core, Flutter UI in repo root
+Package    : com.foxymusic
+Current    : versionName 1.3.0, versionCode 7
 
-This file is the single source of truth for agents, contributors, and release
-engineering. The public-facing README is README.md (Metrolist-style). Extended
-architecture notes live in docs/README.md.
-
-
-QUICK ORIENTATION
------------------
-  Kotlin owns truth for playback, persistence, networking, recognition, updates.
-  Flutter owns screens, animations, and most user-visible layout.
-  Never add new UI under foxy_flutter_ui/ — it is legacy and gitignored.
-
-  Primary Dart entry : lib/main.dart
-  Bridge             : FoxyFlutterChannels.kt + FoxyFlutterBridge.kt
-  Player engine      : MusicPlayer.kt + FoxyMediaSessionService.kt
-  YT API             : YTMusicApi.kt, StreamExtractor.kt
+This file is the working blueprint for agents, maintainers, and future UI work.
+The public README is README.md. Contributor architecture notes also live in
+docs/README.md.
 
 
-BUILD COMMANDS (Windows, repo root)
------------------------------------
+CORE RULE
+---------
+Kotlin owns playback truth, persistence, networking, stream extraction,
+recognition, downloads, update checks, and native file pickers.
+
+Flutter owns screens, layout, user interactions, animations, bottom nav,
+mini-player, settings UI, and the visual Home/Search/Library/Player surfaces.
+
+Do not add new UI under foxy_flutter_ui/. It is legacy and ignored. Use lib/.
+
+
+IMPORTANT FILES
+---------------
+Flutter
+  lib/main.dart
+    Main app shell, Home, Search, Library, Settings, mini-player, now playing.
+
+  lib/foxy_startup_splash.dart
+    Startup splash animation.
+
+Kotlin
+  app/src/main/java/com/foxymusic/FoxyFlutterChannels.kt
+    Method/event channel names.
+
+  app/src/main/java/com/foxymusic/FoxyFlutterBridge.kt
+    Main Flutter <-> Kotlin bridge, home feed, search payloads, library feed,
+    settings map, recognition, updater, song menu context.
+
+  app/src/main/java/com/foxymusic/MusicPlayer.kt
+    Media3 player, queue, crossfade, playback state, radio continuation.
+
+  app/src/main/java/com/foxymusic/StreamExtractor.kt
+    Stream URL extraction and audio quality selection.
+
+  app/src/main/java/com/foxymusic/YTMusicApi.kt
+    YouTube Music search/browse helpers, categorized search, artist profiles.
+
+  app/src/main/java/com/foxymusic/FoxySettings.kt
+    Persisted app settings.
+
+  app/src/main/java/com/foxymusic/MainActivity.kt
+    Flutter entry, native pickers, custom Home background bridge.
+
+
+BUILD AND CHECK COMMANDS
+------------------------
+From repo root on Windows:
+
   .\gradlew.bat assembleDebug
   .\gradlew.bat assembleRelease
-  .\gradlew.bat bundleRelease
-
-Outputs
-  app\build\outputs\apk\debug\
-  app\build\outputs\apk\release\     (per-ABI splits)
-  app\build\outputs\bundle\release\app-release.aab
-
-Requirements
-  JDK 17+
-  Android SDK API 34+
-  Flutter SDK (for lib/ — Puro path example:
-    C:\Users\<user>\.puro\envs\stable\flutter\bin\flutter.bat)
-
-Release signing
-  Copy key.properties.example → key.properties
-  Fill storeFile, storePassword, keyAlias, keyPassword
-  Without key.properties, release may sign with debug key (see app/build.gradle)
-
-Useful checks
-  flutter analyze lib/main.dart
   .\gradlew.bat :app:compileDebugKotlin
 
+Flutter/Dart checks:
 
-VERSION BUMP CHECKLIST
-----------------------
-  1. app/build.gradle
-       versionCode  (int, strictly increasing)
-       versionName  (semver string, shown in UI + GitHub compare)
-  2. pubspec.yaml version (Flutter module metadata; keep aligned)
-  3. lib/main.dart → _kAppVersionLabel / _kAppVersionName if hard-coded
-  4. changelog.txt — user-facing bullet list
-  5. README.md — "Current version" line if present
-  6. Tag release on GitHub after APK upload
+  C:\Users\<user>\.puro\envs\stable\flutter\bin\dart.bat format lib/main.dart
+  C:\Users\<user>\.puro\envs\stable\flutter\bin\dart.bat analyze lib/main.dart
+  C:\Users\<user>\.puro\envs\stable\flutter\bin\flutter.bat analyze
 
 
-FLUTTER ↔ KOTLIN BRIDGE
------------------------
-Channels (FoxyFlutterChannels.kt)
+BRIDGE CONTRACT
+---------------
+Channels:
 
   MethodChannel : foxy_music/methods
   EventChannel  : foxy_music/events
 
-Dart (lib/main.dart)
+Dart constants:
 
   const _method = MethodChannel('foxy_music/methods');
   const _events = EventChannel('foxy_music/events');
 
-When adding a method
-  1. Add constant in FoxyFlutterChannels.Methods
-  2. Handle in FoxyFlutterBridge.onMethodCall
-  3. Call from Dart via _method.invokeMethod(...)
-  4. Document here + docs/README.md if public-facing
+When adding a bridge method:
 
-Core methods (non-exhaustive)
-  getAppearance / setAppearance   Theme, playback prefs, updater toggles
-  getPlayerState                  Queue, transport, crossfade, lyrics pref
-  playQueue / pause / resume / seekTo / next / previous
-  download / removeDownload       Offline library
-  getLibraryFeed / getHomeFeed    Shelves + library snapshots
-  checkGitHubRelease              Manual update check → map
-  getAppVersion                   { versionName, versionCode }
-  openExternalUrl                 Browser / APK download
+  1. Add the constant in FoxyFlutterChannels.Methods.
+  2. Implement it in FoxyFlutterBridge.onMethodCall.
+  3. Call it from lib/main.dart with _method.invokeMethod(...).
+  4. Update this file if the behavior is user-visible or architectural.
+
+Important methods:
+
+  getAppearance / setAppearance
+    Theme, playback prefs, update prefs, Home background flags.
+
+  getPlayerState
+    Current song, queue, index, position, duration, playback flags, settings.
+
+  playQueue / pause / resume / togglePlayPause / seekTo / next / previous
+    Player transport.
+
+  homeFeed
+    Hybrid Home feed sections used by Flutter shelves.
+
+  searchAll
+    Foxy categorized search payload:
+    songs, videos, albums, artists.
+
+  resolveArtistProfile
+    Artist page payload: best artist profile, songs, albums.
+
+  songMenuContext
+    Lightweight menu context for overflow sheets. Use this instead of loading
+    the full library feed inside every three-dot menu.
+
+  libraryFeed
+    Liked, history, downloads, most played, playlists, recognized tracks.
+
+  download / removeDownload
+    Offline library mutations.
+
+  pickHomeBackground / clearHomeBackground
+    Native image picker and custom Home background storage.
+
   startRecognition / stopRecognition / getRecognitionHistory
-  backupLibrary / restoreLibrary  FoxyBackup.kt
+    Music recognition flow.
 
-Core events (map with "type" field)
-  playerState           Full player snapshot (emit on transport changes)
-  appearanceChanged     Settings/theme applied
-  libraryFeedChanged    Library or downloads mutated
-  updateAvailable       { update: { ok, updateAvailable, tagName, ... } }
-  recognitionResult     Mic identification finished
-  recognitionHistoryChanged
+  checkGitHubRelease / getAppVersion / openExternalUrl
+    Updater and external links.
 
-Player state hygiene
-  FoxyFlutterBridge merges live ExoPlayer position/duration into snapshots.
-  Buffering is suppressed when effectively playing (avoids stuck mini-player).
+Important events:
 
+  playerState
+    Native player snapshot. Flutter must avoid rebuilding the whole Home page
+    from progress-only changes.
 
-HOME FEED
----------
-Kotlin assembly : FoxyFlutterBridge.kt (home feed builder)
-Fallback rows   : YTMusicApi.fallbackRecommendationSections()
-Dart layout     : _homeSectionLayout() in lib/main.dart
-Dart suppression: _isSuppressedHomeSection()
+  appearanceChanged
+    Settings/theme/background changes.
 
-Layout kinds (_HomeSectionLayout)
-  square  — horizontal card rail (resume, replayed, downloaded)
-  grid    — 2-column shelf (today on foxy, india pulse, hidden gems, covers…)
-  radio   — compact two-row radio starters
-  mixes   — mix cards
-  video   — wide video thumbnails
-  chart   — chart shelf
-  artist  — circular artist avatars
-  cards   — vertical song list
+  libraryFeedChanged / libraryDownloadsChanged / libraryDownloadProgress
+    Library and download updates.
 
-Explore launcher (Moods / Genres / Charts) inserts after "New releases"
-via _homeFeedSlivers() in _HomeTabState.
+  updateAvailable
+    GitHub updater result.
 
-Spacing constants (lib/main.dart)
-  _kHomeShelfGap        Vertical gap between shelves (14)
-  _kHomeShelfTitleGap   Title → content (8)
-  _kHomeExploreRailGap  Between explore rails (14)
-  _HomeShelfShell       Wrapper applying shelf top gap
+  recognitionResult / recognitionHistoryChanged
+    Song recognition updates.
 
 
-NOW PLAYING
------------
-Main sheet : _NowPlayingSheet in lib/main.dart
-Footer alt : lib/now_playing_footer.dart (SimpMusic-style path)
-Lyrics tab : lib/now_playing_surfaces.dart
+HOME SCREEN BLUEPRINT
+---------------------
+Home UI lives in _HomeTab and _HomeTabState in lib/main.dart.
 
-Spacing (screen-height based inside LayoutBuilder)
-  titleSeekGap      viewH * 0.05  (title row → seek bar)
-  controlsLyricsGap viewH * 0.02  (transport → compact lyrics card)
+Current design goals:
 
-Notification layout : app/src/main/res/layout/notification_foxy_media.xml
-  RemoteViews-safe only — no raw <View> or <Space>; use margins / empty TextView.
+  - AMOLED black background.
+  - Premium, less crowded, easy to scroll.
+  - No huge repeated shelves stacked endlessly.
+  - Mini-player and bottom nav must not cover cards.
+  - First render should feel fast using cached content and skeleton shells.
+  - Home shelf artwork uses thumbnail/homeArtwork routes for efficiency.
+  - Player artwork may still use high quality artwork.
+
+Initial load behavior:
+
+  - _HomeCache keeps last Home feed sections in memory.
+  - If Home is refreshing and cached sections exist, keep content visible.
+  - If no sections exist yet, show _HomeLoading skeleton shells.
+  - Home feed native jobs have timeout guards in FoxyFlutterBridge so optional
+    shelves do not block the whole Home page.
+
+Top structure:
+
+  1. Foxy Pick hero
+     _HomeSpotlight
+     Large rounded rectangle, currently compacted from the original oversized
+     version. Uses clear artwork, not heavy blur. Contains title, artist, Play,
+     and Radio.
+
+  2. Quick chips
+     _HomeQuickActionChips
+     Moods, Genres, Charts, Downloads, Radio, History.
+
+     Moods/Genres/Charts route into Library category drill-ins:
+       _LibraryTabState.scopeMoods
+       _LibraryTabState.scopeGenres
+       _LibraryTabState.scopeCharts
+
+     Downloads routes to Library.
+     History routes to Search with query/history intent.
+
+  3. Feed shelves
+     _HomeFeedSection picks a visual layout from _homeSectionLayout().
+
+Layout routing:
+
+  _HomeSectionLayout.square
+    Horizontal square cards. Used for resume/replay/downloaded/fresh rows.
+    Cards are true square cards with full artwork and bottom gradient text.
+
+  _HomeSectionLayout.chart
+    Wide horizontal banner row. Used for Charting now and Trending now.
+    Do not add ranking badges here. No square cards for these sections.
+
+  _HomeSectionLayout.artist
+    Transparent artist rail. Circular artwork only, no glass/card background.
+    Artist name comes from song.title; subtitle/subscribers stay secondary data.
+
+  _HomeSectionLayout.radio
+    Compact two-row station tiles.
+
+  _HomeSectionLayout.mixes
+    Compact listen-together/mix cards. These must not become oversized.
+
+  _HomeSectionLayout.video
+    Compact video-style banner cards with full artwork and overlay text.
+
+  _HomeSectionLayout.cards
+    Vertical/row song card list.
+
+Home card rules:
+
+  - Normal shelf cards should stay about 15 percent shorter than the old tall
+    layout.
+  - Square cards should be square.
+  - Charting now and Trending now are exceptions: keep them wide banner cards.
+  - Artwork should cover the full card.
+  - Text must be inside the border and must use ellipsis/maxLines.
+  - Use bottom gradient or blur-gradient overlays to keep titles readable.
+  - Horizontal rows must start from the first card, not centered.
+  - Avoid huge empty gaps between sections.
+
+Bottom spacing:
+
+  _HomeTab receives bottomContentPadding from the shell.
+  This padding must include mini-player height + nav bar height + safe area.
+  Cards should never hide behind mini-player/nav.
+
+Mini-player:
+
+  Floating glass mini-player sits above bottom nav.
+  Avoid full Home rebuilds on progress-only player updates.
 
 
-PLAYBACK & SETTINGS (Kotlin)
-----------------------------
-MusicPlayer.kt          ExoPlayer queue, crossfade ramps, buffering
-FoxySettings.kt         Persisted prefs (crossfade, normalize, quality, etc.)
-FoxyMediaSessionService Foreground notification + media session
-StreamExtractor.kt      Stream URL resolution, quality ladders
-YtmRadioSession.kt      Radio tail continuation
+HOME FEED SOURCE BLUEPRINT
+--------------------------
+Native feed builder:
 
-Notable Flutter settings surfaces
-  Stream / download quality, Ultra path, SoundCloud-first
-  Crossfade ms, normalize volume, skip silence
-  SponsorBlock, recognition source & history limit
-  Auto update check + notification toggle
+  FoxyFlutterBridge.kt -> HOME_FEED
 
+Private research folders:
 
-RECOGNITION
------------
-FoxyRecognition.kt
-FoxyRecognitionShazamSignatureGenerator.kt
-FoxyRecognitionVibraSignature.kt
-FoxyRecognitionHistory.kt
+  SimpMusic-main/
+    Root-level local reference for categorized discovery behavior.
 
-Mic flow starts from home top bar → bridge → native capture + identify.
+  ArchiveTune-main/
+    Root-level local reference for broader shelf/category behavior.
 
+Implementation rule:
 
-UPDATER (GitHub releases/latest)
---------------------------------
-Kotlin
-  FoxyGithubUpdate.kt    Semver-ish compare, prefers arm64-v8a APK asset
-  FoxyUpdatePrefs.kt     24h throttle (last_check_ms), last_notified_tag
-  FoxyUpdateNotifier.kt  Channel "foxy_app_updates"
+  Use those folders only to understand behavior and edge cases. FoxyMusic code,
+  class names, comments, labels, and docs must describe Foxy-owned concepts.
+  Do not leave source comments or UI labels that imply external ownership.
 
-Settings keys (via appearance map)
-  autoCheckUpdates      default true
-  updateNotifications   default true
+Current feed shape:
 
-Flow
-  1. Flutter subscribes to EventChannel → bridge may run throttled auto-check
-  2. Newer tag than installed versionName → updateAvailable event + optional notification
-  3. Settings "Check for updates now" → checkGitHubRelease (no throttle)
-  4. openExternalUrl for release page or APK
+  - Hybrid personalized shelves from history/library.
+  - Search/recommendation fallback rows from YTMusicApi.
+  - Featured artists section from YTMusicApi.searchArtistProfiles.
+  - Downloaded but forgotten appears only when downloaded songs exist.
+  - Repetitive shelves such as Most replayed / Today on Foxy / High quality
+    picks should be merged conceptually into Resume/Foxy Picks where possible.
+
+Performance rules:
+
+  - Load only the first visible sections initially.
+  - Increase visible section count in batches while scrolling.
+  - Avoid more than 6 items in grid-like sections.
+  - Cache artwork thumbnails.
+  - Use homeArtwork / thumbnail routes for shelves.
+  - Keep player high-quality artwork path separate.
+  - Use withTimeoutOrNull around slow optional native feed jobs.
 
 
-GLASS UI RULES (Flutter)
+SEARCH BLUEPRINT
+----------------
+Search UI lives in:
+
+  _SearchTab
+  _SearchResultsPage
+  _FoxySearchResultRow
+  _ArtistPage
+
+Native categorized search:
+
+  FoxyFlutterBridge.kt -> SEARCH_ALL
+  YTMusicApi.searchAll(query, limit)
+
+Search categories:
+
+  All
+  Songs
+  Videos
+  Albums
+  Artists
+
+How it works:
+
+  - SEARCH_ALL returns songs/videos/albums/artists.
+  - _SearchTab caches recent query snapshots in _SearchTabState._resultCache.
+  - Albums and Artists are shown in the inline All grouping, not hidden behind
+    only song rows.
+  - Albums tab shows album rows.
+  - Artists tab shows artist rows.
+  - Artist rows show artist name from song.title and open _ArtistPage.
+  - Song/video/album rows may use the overflow menu.
+  - Artist rows should not open the heavy song overflow menu.
+
+Artist page:
+
+  _ArtistPage calls resolveArtistProfile.
+  It shows top artist songs and albums.
+  Artist artwork can be passed from search/home or resolved natively.
+
+
+LIBRARY BLUEPRINT
+-----------------
+Library UI lives in _LibraryTab and _LibraryTabState.
+
+Collection scopes:
+
+  _scopeHub
+  _scopeLiked
+  _scopeHistory
+  _scopeDownloads
+  _scopeMostPlayed
+  _scopePlaylists
+  _scopeRecognized
+
+Browse/category scopes:
+
+  scopeMoods
+  scopeGenres
+  scopeCharts
+  scopeArtists
+
+How it works:
+
+  - The Library hub shows "Your collection" tiles and "Browse music" tiles.
+  - Moods, Genres, Charts, and Artists open category drill-ins.
+  - Category drill-ins do not depend on libraryFeed loading.
+  - Category tiles call widget.onDiscoverSearch(query), which routes into the
+    Search tab with a prefilled query.
+  - Home quick chips route into these same Library scopes.
+
+Current category examples:
+
+  Moods
+    Relax, Sleep, Focus, Drive, Party, Phonk.
+
+  Genres
+    Bollywood, Punjabi, Indie, Hip hop, EDM, Lofi.
+
+  Charts
+    India Top, Global, Trending, New Hot.
+
+  Artists
+    Top artists, India artists, Pop artists, Indie artists.
+
+Downloads:
+
+  - Downloads scope shows offline songs and active download progress.
+  - Downloaded but forgotten Home shelf should only exist when downloads exist.
+
+Playlists:
+
+  - Local/user playlists are stored through FoxyUserPlaylists.
+  - YouTube playlists may appear when account integration is available.
+
+
+THREE-DOT MENU BLUEPRINT
 ------------------------
-  _FoxyGlassTint      Scroll surfaces — no BackdropFilter (avoids jank)
-  _FoxyGlassButton    blur: true only on fixed chrome (nav, header pills)
-  Home shelf cards    Do not use selected: true for bg tint — active state via
-                      artwork overlay / accent text only
+Main function:
 
-Assets (pubspec.yaml)
-  assets/images/app_art.png      App logo (top bar, about)
-  assets/images/foxy_home_bg.png   Home backdrop
-  assets/images/foxy_splash.png    Splash
-  assets/images/splash/            Frame sequence for startup fox
+  showFoxySongOverflowMenu(...)
+
+Rules:
+
+  - Use songMenuContext for quick state/context.
+  - Do not call libraryFeed inside every menu open; it causes lag.
+  - Menu contents should be contextual:
+      song rows: play next, add queue, like, download, playlist, artist/search
+      album rows: album/search actions, avoid song-only assumptions
+      artist rows: usually navigate/open artist, no heavy song menu
+      queue rows: include remove from queue when requested
+      downloads: include remove download where appropriate
+  - Keep bottom sheet lightweight and avoid expensive work before first paint.
 
 
-PROJECT LAYOUT
---------------
-  app/src/main/java/com/foxymusic/   All native logic
-  lib/                               Flutter UI modules
-  assets/images/                     Bundled art
-  gradle/ + gradlew.bat              Wrapper
-  changelog.txt                      Release notes (user-facing)
-  README.md                          GitHub landing page
-  docs/README.md                     Architecture supplement
+SETTINGS BLUEPRINT
+------------------
+Settings UI is in lib/main.dart around _SettingsSheet and related sections.
+Persistence is native in FoxySettings.kt via getAppearance/setAppearance.
 
-Do NOT commit
-  build/, .gradle/, key.properties, *.jks
-  ArchiveTune-main/, .codex-backups/, reference zips
-  *.log, adb screenshots, _last_*.txt
+Important working areas:
+
+  Playback
+    Audio quality tier, crossfade, normalize, skip silence, replay gain.
+
+  Downloads/cache
+    Download quality, cache cleanup, lyrics cache cleanup, library repair.
+
+  Lyrics
+    Lyrics source preferences, romanization/transliteration behavior.
+
+  Recognition
+    Recognition settings and history controls.
+
+  Appearance
+    AMOLED/glass treatment, custom Home background.
+
+  Updates
+    Manual update check, auto-check, notifications.
+
+Removed/merged preference:
+
+  Network preference is intentionally removed from UI. Audio quality preference
+  is the single user-facing control for stream quality/network use.
+
+Custom Home background:
+
+  - Flutter calls pickHomeBackground.
+  - MainActivity stores the image through FoxyHomeBackground.
+  - MainActivity sets homeBackgroundEnabled = true after successful pick.
+  - clearHomeBackground removes it and sets homeBackgroundEnabled = false.
+  - Flutter _loadAppearance only applies homeBackgroundPath when enabled.
+
+
+AUDIO QUALITY BLUEPRINT
+-----------------------
+Native implementation:
+
+  StreamExtractor.kt
+    qualityPreferenceForTier()
+    qualityPreferenceScore()
+
+Current tier intent:
+
+  Low
+    Pick the least practical stream. Target very low bitrate.
+
+  Normal
+    Target around 220 kbps.
+
+  High
+    Target around 320 kbps.
+
+  Ultra
+    Prefer streams above 320 kbps when available, especially Opus, FLAC, AAC.
+    If no 320+ stream exists, pick the best available stream.
+
+Important:
+
+  - The player should keep high-quality playback logic.
+  - Home shelf thumbnails should stay efficient and must not force player-grade
+    artwork or stream quality.
+
+
+ARTWORK BLUEPRINT
+-----------------
+Song model exposes multiple artwork concepts in Flutter:
+
+  artwork
+    Default artwork.
+
+  homeArtwork
+    Efficient Home/shelf thumbnail route. Use this in Home shelves and small
+    rows where possible.
+
+  highQualityArtwork
+    Player, artist page, large artwork, and high-detail surfaces.
+
+Rules:
+
+  - Home cards should generally use homeArtwork.
+  - Player/Now Playing can use highQualityArtwork.
+  - Cards should set fit/cover behavior through _Artwork usage and full-card
+    Stack layouts.
+  - Use gradient overlays for text readability instead of putting text outside
+    the card border.
+
+
+NOW PLAYING AND MINI-PLAYER
+---------------------------
+Main sheet:
+
+  _NowPlayingSheet in lib/main.dart
+
+Mini-player:
+
+  Floating above nav bar with glass/blur shell.
+  Uses current player state but should not force Home shelves to rebuild every
+  time only position/progress changes.
+
+Notification:
+
+  app/src/main/res/layout/notification_foxy_media.xml
+
+RemoteViews warning:
+
+  Android notifications must stay RemoteViews-safe. Avoid unsupported raw View
+  types in notification XML.
+
+
+RECOGNITION BLUEPRINT
+---------------------
+Native files:
+
+  FoxyRecognition.kt
+  FoxyRecognitionShazamSignatureGenerator.kt
+  FoxyRecognitionVibraSignature.kt
+  FoxyRecognitionHistory.kt
+
+Flow:
+
+  Home mic button -> startRecognition -> native capture/signature -> result
+  event -> Flutter displays/resolves the match.
+
+Recognized history appears in Library Recognized scope.
+
+
+UPDATER BLUEPRINT
+-----------------
+Native files:
+
+  FoxyGithubUpdate.kt
+  FoxyUpdatePrefs.kt
+  FoxyUpdateNotifier.kt
+
+Flow:
+
+  - Compares installed versionName to GitHub releases/latest.
+  - Auto-check is throttled.
+  - Manual check from settings bypasses throttle.
+  - updateAvailable event can show UI and notification.
+  - openExternalUrl opens release page or APK asset.
+
+
+DESIGN RULES
+------------
+Home:
+
+  - AMOLED black first.
+  - Rounded cards around 18-24 px, unless compact rows need less.
+  - Thin white/gray borders.
+  - White bold section titles.
+  - Gray secondary text.
+  - No large random gaps.
+  - Section margin should stay consistent.
+  - Chips belong near the top, directly after the hero.
+  - Avoid repetitive shelf names and duplicate content.
+
+Cards:
+
+  - Artwork covers the whole card.
+  - Text stays inside the card.
+  - Use maxLines and TextOverflow.ellipsis.
+  - Use bottom gradient/blur-gradient for readability.
+  - Horizontal rows start at first item.
+
+Artists:
+
+  - Artist Home shelf has no card background.
+  - Use circular artwork.
+  - Show artist name clearly.
+
+Charts/Trending:
+
+  - Use wide horizontally scrollable banner cards.
+  - Do not square them.
+  - Do not show numbering badges.
+
+Glass:
+
+  - _FoxyGlassTint: cheap scroll surfaces, avoid excessive BackdropFilter.
+  - _FoxyGlassButton blur: true only for fixed chrome and small controls.
+  - Avoid blur-heavy repeated list items.
+
+
+LOCAL RESEARCH FIXTURES
+-----------------------
+SimpMusic-main/
+
+  Research:
+    - Search categories: Songs, Videos, Albums, Artists.
+    - Artist rows/pages.
+    - Home row/card behavior.
+    - Lightweight contextual menu behavior.
+    - Library dynamic categories/top artists/top albums patterns.
+
+ArchiveTune-main/
+
+  Research:
+    - More varied feed/shelf ideas.
+    - Additional Home sections and discovery concepts.
+
+These folders are not product dependencies. Keep implementation names,
+comments, and user-facing strings FoxyMusic-native.
+
+
+VERSION BUMP CHECKLIST
+----------------------
+When releasing:
+
+  1. app/build.gradle
+       versionCode must strictly increase.
+       versionName should match public release.
+
+  2. pubspec.yaml
+       Keep Flutter version metadata aligned if used.
+
+  3. lib/main.dart
+       Update _kAppVersionLabel / version labels if hard-coded.
+
+  4. changelog.txt
+       User-facing release notes first.
+
+  5. README.md
+       Update public version/features if needed.
+
+  6. GitHub release
+       Upload APKs and tag.
+
+
+DO NOT COMMIT
+-------------
+Do not commit:
+
+  build/
+  .gradle/
+  key.properties
+  *.jks
+  logs, screenshots, temporary adb captures
+  ArchiveTune-main/
+  SimpMusic-main/ if it is only a local reference copy
+  .codex-backups/
+  reference zips
 
 
 AGENT WORKFLOW
 --------------
-1. Read this file + grep the feature area before editing.
-2. Kotlin first if playback, downloads, API, or persistence changes.
-3. Expose bridge contract, then wire Flutter.
-4. Keep diffs focused — match existing naming and patterns.
-5. Run flutter analyze and/or gradlew compile when possible.
-6. Update changelog.txt for user-visible changes.
-7. Do not commit unless the user explicitly asks.
+Before edits:
+
+  1. Read this file.
+  2. Use rg to find the current feature area.
+  3. Check whether the behavior belongs in Kotlin or Flutter.
+
+Implementation:
+
+  - Kotlin first for playback, downloads, API, recognition, settings storage.
+  - Flutter first for layout, visual behavior, tabs, menus, interactions.
+  - Keep bridge contracts explicit.
+  - Match existing naming and patterns.
+  - Keep diffs focused.
+  - Do not revert user changes.
+
+Validation:
+
+  - Run dart format for edited Dart files.
+  - Run dart analyze lib/main.dart for main UI changes.
+  - Run .\gradlew.bat :app:compileDebugKotlin when bridge/native/app compile
+    confidence is needed.
+  - Note known project-level analyze issues separately.
+
+Documentation:
+
+  - Update this file for architectural changes.
+  - Update changelog.txt for user-visible release changes.
+  - Do not commit unless the user explicitly asks.
 
 
-CHANGELOG (engineering mirror)
-------------------------------
-2026-06 — v1.3.0 Flutter-first UI: home shelf spacing, resume horizontal rail,
-           now playing gaps, notification RemoteViews fix, playback resync,
-           settings cleanup, logo asset wiring, recognition stack.
-2026-06 — v1.2.2 GitHub updater, ultra quality path, theme refresh.
-2026-05 — v1.2.x Glass UI, crossfade, LRCLIB lyrics, mini player polish.
+ENGINEERING MIRROR CHANGELOG
+----------------------------
+2026-06
+  - Flutter-first Home redesign: Foxy Pick hero, quick chips, compact shelves,
+    square card rails, chart/trending banner rails, transparent artist shelf.
+  - Hybrid feed shaped from local research, implemented with Foxy-owned names.
+  - Search supports categorized Songs/Videos/Albums/Artists.
+  - Library supports category drill-ins for Moods/Genres/Charts/Artists.
+  - Home loading uses skeleton shells and cached content during refresh.
+  - Three-dot menu uses lightweight songMenuContext.
+  - Custom Home background fixed through native picker and appearance flag.
+  - Audio quality tiers clarified: Low, Normal, High, Ultra.
 
-User-facing bullets always go in changelog.txt first.
+2026-06
+  - v1.3.0 Flutter-first UI, recognition stack, settings cleanup,
+    notification RemoteViews fix, playback resync, updater polish.
+
+2026-06
+  - v1.2.2 GitHub updater, ultra quality path, theme refresh.
+
+2026-05
+  - v1.2.x Glass UI, crossfade, LRCLIB lyrics, mini-player polish.

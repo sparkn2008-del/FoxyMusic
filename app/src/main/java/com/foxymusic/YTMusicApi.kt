@@ -136,7 +136,7 @@ object YTMusicApi {
     suspend fun videos(query: String): List<Song> =
         search(query, filterVideos)
 
-    /** SimpMusic-style categorized search (songs / videos / albums / artists). */
+    /** Foxy-style categorized search (songs / videos / albums / artists). */
     suspend fun searchAll(query: String, limitPerCategory: Int = 28): Map<String, List<Song>> {
         if (query.isBlank()) {
             return mapOf(
@@ -501,26 +501,27 @@ object YTMusicApi {
         if (title.isBlank()) return null
         if (YtmMusicFilter.isObviouslyNonPlayable(title, artist)) return null
 
-        val thumbnail = renderer.findThumbnail()
+        val thumbnail = renderer.findPrimaryThumbnail().ifBlank { renderer.findThumbnail() }
         val playlistId = renderer.findPlaylistId().takeIf {
             renderer.optJSONObject("navigationEndpoint")?.has("watchPlaylistEndpoint") != true
         }
-        val poster = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
+        val fallbackPoster = "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+        val artwork = thumbnail.ifBlank { fallbackPoster }
         return Song(
             videoId = videoId,
             title = title,
             artist = artist,
-            thumbnail = thumbnail.ifBlank { poster },
+            thumbnail = artwork,
             duration = meta.duration,
             album = meta.album,
             playlistId = playlistId,
-            artworkUrl = poster,
+            artworkUrl = artwork,
         )
     }
 
     private fun parseArtistProfileRenderer(renderer: JSONObject): ArtistProfileResult? {
         val browseId = renderer.findBrowseId()
-        val thumbnail = renderer.findThumbnail()
+        val thumbnail = renderer.findPrimaryThumbnail().ifBlank { renderer.findThumbnail() }
         if (browseId.isBlank() && thumbnail.isBlank()) return null
 
         val columns = renderer.optJSONArray("flexColumns")
@@ -689,6 +690,29 @@ object YTMusicApi {
             if (id.isNotBlank()) best = id
         }
         return best
+    }
+
+    private fun JSONObject.findPrimaryThumbnail(): String {
+        fun from(key: String): String =
+            optJSONObject(key)?.findThumbnail().orEmpty()
+
+        from("thumbnail").takeIf { it.isNotBlank() }?.let { return it }
+        from("thumbnailRenderer").takeIf { it.isNotBlank() }?.let { return it }
+        from("musicThumbnailRenderer").takeIf { it.isNotBlank() }?.let { return it }
+
+        optJSONObject("thumbnail")
+            ?.optJSONObject("musicThumbnailRenderer")
+            ?.findThumbnail()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        optJSONObject("thumbnailRenderer")
+            ?.optJSONObject("musicThumbnailRenderer")
+            ?.findThumbnail()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        return ""
     }
 
     private fun JSONObject.findThumbnail(): String {

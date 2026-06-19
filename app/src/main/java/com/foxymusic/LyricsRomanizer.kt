@@ -3,42 +3,52 @@ package com.foxymusic
 import android.icu.text.Transliterator
 
 /**
- * SimpMusic-style "lyrics in English alphabets" — romanize non-Latin script to Latin.
+ * Romanizes non-Latin lyric lines into readable Latin text.
+ *
+ * Keep this conservative: if ICU cannot produce mostly Latin output, return the
+ * original lyric instead of showing broken transliteration.
  */
 object LyricsRomanizer {
 
     private val toLatin: Transliterator? by lazy {
         runCatching {
-            Transliterator.getInstance("Any-Latin; NFD; [:Nonspacing Mark:] Remove; NFC; Latin-ASCII")
+            Transliterator.getInstance("Any-Latin; Latin-ASCII")
         }.getOrNull()
     }
 
     fun romanizeLine(text: String, enabled: Boolean): String {
         if (!enabled || text.isBlank()) return text
-        if (text.none { Character.UnicodeBlock.of(it) !in latinBlocks }) return text
+        if (!text.any { Character.UnicodeBlock.of(it) !in latinBlocks }) return text
         val transliterator = toLatin ?: return text
-        return runCatching {
+        val romanized = runCatching {
             synchronized(transliterator) {
                 transliterator.transliterate(text)
-                    .replace("ṁ", "m")
-                    .replace("ṃ", "m")
-                    .replace("ṅ", "n")
-                    .replace("ñ", "ny")
-                    .replace("ś", "sh")
-                    .replace("ṣ", "sh")
-                    .replace("ā", "aa")
-                    .replace("ī", "ee")
-                    .replace("ū", "oo")
-                    .replace("ṛ", "ri")
-                    .replace("ḍ", "d")
-                    .replace("ṭ", "t")
-                    .replace("ṇ", "n")
-                    .replace("ḷ", "l")
-                    .replace(Regex("[`´’‘]"), "'")
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
             }
         }.getOrDefault(text)
+            .normalizePunctuation()
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (romanized.isBlank()) return text
+        return if (romanized.looksReadableLatin()) romanized else text
+    }
+
+    private fun String.normalizePunctuation(): String = this
+        .replace('’', '\'')
+        .replace('‘', '\'')
+        .replace('`', '\'')
+        .replace('´', '\'')
+        .replace('“', '"')
+        .replace('”', '"')
+        .replace('—', '-')
+        .replace('–', '-')
+
+    private fun String.looksReadableLatin(): Boolean {
+        val letters = count { it.isLetter() }
+        if (letters == 0) return true
+        val latinLetters = count {
+            it.isLetter() && Character.UnicodeBlock.of(it) in latinBlocks
+        }
+        return latinLetters.toDouble() / letters >= 0.85
     }
 
     private val latinBlocks = setOf(

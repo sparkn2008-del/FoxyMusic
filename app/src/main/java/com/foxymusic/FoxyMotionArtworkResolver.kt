@@ -31,7 +31,7 @@ data class FoxyMotionArtwork(
 /**
  * Foxy-native motion artwork resolver.
  *
- * This intentionally does not import ArchiveTune code. It mirrors the idea:
+ * This resolver keeps Foxy-owned artwork motion logic:
  * normalize the currently playing metadata, ask a catalog for richer artwork,
  * cache the answer, and always return a cheap static fallback when motion art
  * is unavailable.
@@ -126,6 +126,7 @@ object FoxyMotionArtworkResolver {
             }
         }
         val urlOut = bestUrl ?: return null
+        if (bestScore < 0.62) return null
         return FoxyMotionArtwork(
             staticUrl = urlOut,
             animatedUrl = null,

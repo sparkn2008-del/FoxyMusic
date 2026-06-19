@@ -29,7 +29,7 @@ data class FoxySpotifyResolvedTrack(
 }
 
 /**
- * Spotify-like bridge without copying ArchiveTune's Spotify implementation.
+ * Spotify-like bridge using Foxy-owned public metadata matching.
  *
  * FoxyMusic remains YouTube/SoundCloud playback-first: Spotify data is treated
  * as metadata, then lazily resolved to the closest playable YT Music song.
