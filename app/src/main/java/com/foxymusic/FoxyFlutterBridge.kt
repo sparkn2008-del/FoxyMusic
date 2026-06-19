@@ -868,24 +868,21 @@ class FoxyFlutterBridge(
                                         "Chill Radio" to "chill radio songs",
                                         "Throwback Radio" to "throwback radio hits",
                                     )
+                                    "categories" -> listOf(
+                                        "Phonk" to "phonk songs",
+                                        "Classic hits" to "classic hits songs",
+                                        "Old is gold" to "old hindi songs classics",
+                                        "Acoustic" to "acoustic songs unplugged",
+                                        "Lo-fi" to "lofi songs chill",
+                                        "Devotional" to "devotional songs bhajan",
+                                        "Romantic hits" to "romantic hits songs",
+                                    )
                                     else -> listOf(
                                         seed.replaceFirstChar { it.titlecase(Locale.US) } to "$seed songs mix",
                                         "More ${seed.lowercase(Locale.US)}" to "$seed playlist songs",
                                     )
                                 }
                                 return pairs.map { (title, query) -> searchSection(title, query) }
-                            }
-                            suspend fun broadCategoryShelves(): List<RecommendationSection> {
-                                val pairs = listOf(
-                                    "Phonk" to "phonk songs",
-                                    "Classic hits" to "classic hits songs",
-                                    "Old is gold" to "old hindi songs classics",
-                                    "Acoustic" to "acoustic songs unplugged",
-                                    "Lo-fi" to "lofi songs chill",
-                                    "Devotional" to "devotional songs bhajan",
-                                    "Romantic hits" to "romantic hits songs",
-                                )
-                                return pairs.map { (title, query) -> searchSection(title, query, 16) }
                             }
                             suspend fun featuredArtistSongs(): List<Song> {
                                 val names = listOf(
@@ -1017,19 +1014,6 @@ class FoxyFlutterBridge(
                                                 featuredArtistSongs(),
                                             ),
                                         )
-                                    },
-                                    async {
-                                        listOf(
-                                            RecommendationSection(
-                                                "Categories",
-                                                broadCategoryShelves().flatMap { section ->
-                                                    section.songs.take(2)
-                                                },
-                                            ),
-                                        )
-                                    },
-                                    async {
-                                        broadCategoryShelves()
                                     },
                                     async {
                                         listOf(

@@ -860,6 +860,8 @@ String? _homeMoodQueryForChip(String chip) {
       return 'genres';
     case 'Charts':
       return 'charts';
+    case 'Categories':
+      return 'categories';
     case 'Downloads':
       return 'downloaded';
     case 'Radio':
@@ -1791,9 +1793,17 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     final accent = Theme.of(context).colorScheme.primary;
     super.build(context);
     final feedSections = _orderedSections;
+    final categoryFeedSections = _homeChip == 'All' || _homeChip == 'Charts'
+        ? feedSections
+        : feedSections
+              .where((section) {
+                final title = section.title.toLowerCase();
+                return !title.contains('chart') && !title.contains('trending');
+              })
+              .toList(growable: false);
     final visibleSections = _homeChip == 'All'
         ? feedSections.take(_visibleSectionCount).toList()
-        : feedSections;
+        : categoryFeedSections;
     final spotlightSong = _homeChip == 'All' ? _spotlightSong : null;
     return RefreshIndicator(
       color: accent,
@@ -1892,6 +1902,7 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
                 onOpenMoods: () => _onHomeChip('Moods'),
                 onOpenGenres: () => _onHomeChip('Genres'),
                 onOpenCharts: () => _onHomeChip('Charts'),
+                onOpenCategories: () => _onHomeChip('Categories'),
                 onOpenDownloads: () => _onHomeChip('Downloads'),
                 onOpenHistory: () => _onHomeChip('History'),
               ),
@@ -1920,7 +1931,7 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
                 onBack: resetToDefault,
               ),
             ),
-            ...feedSections.map(
+            ...categoryFeedSections.map(
               (sec) => SliverToBoxAdapter(
                 child: _HomeShelfShell(
                   child: _HomeFeedSection(
@@ -2112,6 +2123,7 @@ class _HomeQuickActionChips extends StatelessWidget {
     required this.onOpenMoods,
     required this.onOpenGenres,
     required this.onOpenCharts,
+    required this.onOpenCategories,
     required this.onOpenDownloads,
     required this.onOpenHistory,
   });
@@ -2120,6 +2132,7 @@ class _HomeQuickActionChips extends StatelessWidget {
   final VoidCallback onOpenMoods;
   final VoidCallback onOpenGenres;
   final VoidCallback onOpenCharts;
+  final VoidCallback onOpenCategories;
   final VoidCallback onOpenDownloads;
   final VoidCallback onOpenHistory;
 
@@ -2128,6 +2141,11 @@ class _HomeQuickActionChips extends StatelessWidget {
     final chips = <({String label, IconData icon, VoidCallback onTap})>[
       (label: 'Moods', icon: Icons.auto_awesome_rounded, onTap: onOpenMoods),
       (label: 'Genres', icon: Icons.category_rounded, onTap: onOpenGenres),
+      (
+        label: 'Categories',
+        icon: Icons.grid_view_rounded,
+        onTap: onOpenCategories,
+      ),
       (label: 'Charts', icon: Icons.show_chart_rounded, onTap: onOpenCharts),
       (
         label: 'Downloads',
@@ -10204,19 +10222,6 @@ class _HomeChartBannerCard extends StatelessWidget {
                 identityTag: song.videoId,
                 offlineArtworkPath: song.offlineArtworkPath,
                 useOfflineArtwork: song.isDownloaded,
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.9),
-                      Colors.black.withValues(alpha: 0.5),
-                      Colors.black.withValues(alpha: 0.1),
-                    ],
-                  ),
-                ),
               ),
               Positioned(
                 left: 12,
