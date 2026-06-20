@@ -9,7 +9,7 @@
 <br/>
 
 [![Latest release](https://img.shields.io/github/v/release/sparkn2008-del/FoxyMusic?style=for-the-badge&labelColor=0d1117&color=1f6feb)](https://github.com/sparkn2008-del/FoxyMusic/releases)
-[![License](https://img.shields.io/badge/License-FOSS-2ea043?style=for-the-badge&labelColor=0d1117)](https://github.com/sparkn2008-del/FoxyMusic)
+[![License](https://img.shields.io/badge/License-GPL--3.0-2ea043?style=for-the-badge&labelColor=0d1117)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android-3ddc84?style=for-the-badge&labelColor=0d1117)](https://github.com/sparkn2008-del/FoxyMusic)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Engine-A97BFF?style=for-the-badge&labelColor=0d1117)](https://kotlinlang.org/)
 [![Flutter](https://img.shields.io/badge/Flutter-UI-54C5F8?style=for-the-badge&labelColor=0d1117)](https://flutter.dev/)
@@ -62,10 +62,10 @@
     <td width="50%" valign="top">
 
 #### Audio & quality
-- Stream quality presets (including **Ultra** / lossless-style paths)
+- Stream quality presets, including **Ultra** for 320kbps+ / best available paths
 - SoundCloud-first routing option for richer playback
 - System equalizer shortcut
-- Download & offline library
+- Downloads plus local library import for songs and folders
 
 </td>
   </tr>
@@ -97,7 +97,7 @@
 
 #### Home & search
 - Personalized home feed shelves
-- Resume your vibe, charting, most replayed
+- Foxy Pick, Resume your vibe, Foxy Picks, India Pulse
 - Moods, genres, and charts explore rails
 - Rich search: songs, albums, artists, videos, playlists
 - Artist pages & related picks
@@ -109,7 +109,7 @@
 - Metrolist-inspired now playing sheet
 - Frosted-glass chrome & AMOLED-friendly dark theme
 - Dynamic accent colors from artwork
-- Animated splash & mini player
+- Animated splash, mini-player styles, and bottom navigation styles
 - In-app GitHub update checks + notifications
 
 </td>
@@ -178,7 +178,7 @@ flutter analyze lib/
 | `assets/images/` | Branding, splash frames, home art |
 | `gradle/` + `gradlew.bat` | Gradle wrapper |
 | `changelog.txt` | User-facing release notes |
-| `FOXYMUSIC_INSTRUCTIONS.txt` | Maintainer & agent guide |
+| `FOXYMUSIC_INSTRUCTIONS.txt` | Maintainer blueprint |
 | `docs/README.md` | Extended architecture notes |
 
 ---
@@ -211,9 +211,16 @@ Bridge contracts, method names, and event payloads → **`FOXYMUSIC_INSTRUCTIONS
 
 | File | Contents |
 |------|----------|
-| [FOXYMUSIC_INSTRUCTIONS.txt](FOXYMUSIC_INSTRUCTIONS.txt) | Build, bridge API, updater, agent workflow |
+| [FOXYMUSIC_INSTRUCTIONS.txt](FOXYMUSIC_INSTRUCTIONS.txt) | Build, bridge API, updater, maintainer workflow |
 | [docs/README.md](docs/README.md) | Architecture deep-dive |
 | [changelog.txt](changelog.txt) | Version history |
+
+---
+
+## License
+
+FoxyMusic is licensed under the **GNU General Public License v3.0**.
+See [LICENSE](LICENSE) for the full license text.
 
 ---
 

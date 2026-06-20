@@ -704,14 +704,20 @@ object StreamExtractor {
     ): Int {
         val bitrate = optInt("bitrate", 0)
         if (tier >= 4) {
-            val preferredCodecBonus = when {
-                optString("mimeType").contains("flac", ignoreCase = true) -> 3_000_000
-                optString("mimeType").contains("opus", ignoreCase = true) -> 2_400_000
-                optString("mimeType").contains("aac", ignoreCase = true) ||
-                    optString("mimeType").contains("mp4a", ignoreCase = true) -> 2_000_000
+            val ultraFloorBonus = when {
+                bitrate > 320_000 -> 200_000_000
+                bitrate == 320_000 -> 150_000_000
                 else -> 0
             }
-            val ultraFloorBonus = if (bitrate >= 320_000) 100_000_000 else 0
+            val preferredCodecBonus = when {
+                optString("mimeType").contains("flac", ignoreCase = true) -> 80_000_000
+                optString("mimeType").contains("alac", ignoreCase = true) -> 76_000_000
+                optString("mimeType").contains("wav", ignoreCase = true) -> 72_000_000
+                optString("mimeType").contains("opus", ignoreCase = true) -> 44_000_000
+                optString("mimeType").contains("aac", ignoreCase = true) ||
+                    optString("mimeType").contains("mp4a", ignoreCase = true) -> 28_000_000
+                else -> 0
+            }
             return ultraFloorBonus + preferredCodecBonus + codecScore() * 100_000 + bitrate
         }
         if (bitrate <= 0) return 0

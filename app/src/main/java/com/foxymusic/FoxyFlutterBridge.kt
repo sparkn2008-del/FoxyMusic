@@ -141,10 +141,14 @@ class FoxyFlutterBridge(
             "playerStyle" to settings.playerStyle,
             "playerButtonsStyle" to settings.playerButtonsStyle,
             "playerArtworkShape" to settings.playerArtworkShape,
+            "hidePlayerArtwork" to settings.hidePlayerArtwork,
+            "cropArtworkSquare" to settings.cropArtworkSquare,
+            "thumbnailCornerRadius" to settings.thumbnailCornerRadius,
             "lyricsAnimationStyle" to settings.lyricsAnimationStyle,
             "lyricsPreferLrclib" to settings.lyricsPreferLrclib,
             "lyricsRomanize" to settings.lyricsRomanize,
             "normalizeVolume" to settings.normalizeVolume,
+            "hapticFeedback" to settings.hapticFeedback,
             "streamQualityTier" to settings.streamQualityTier,
             "streamSourcePriority" to settings.streamSourcePriority,
             "streamBitrate" to ui.streamBitrate,
@@ -366,6 +370,8 @@ class FoxyFlutterBridge(
                         "bottomNavScale" to settings.bottomNavScale,
                         "gridColumns" to settings.gridColumns,
                         "showBottomLabels" to settings.showBottomLabels,
+                        "disableAnimations" to settings.disableAnimations,
+                        "hapticFeedback" to settings.hapticFeedback,
                         "persistentQueue" to settings.persistentQueue,
                         "continuePlaybackWhenDismissed" to settings.continuePlaybackWhenDismissed,
                         "saveHistory" to settings.saveHistory,
@@ -376,7 +382,12 @@ class FoxyFlutterBridge(
                         "playerBackgroundStyle" to settings.playerBackgroundStyle,
                         "playerStyle" to settings.playerStyle,
                         "playerButtonsStyle" to settings.playerButtonsStyle,
+                        "miniPlayerStyle" to settings.miniPlayerStyle,
+                        "bottomNavigationStyle" to settings.bottomNavigationStyle,
                         "playerArtworkShape" to settings.playerArtworkShape,
+                        "hidePlayerArtwork" to settings.hidePlayerArtwork,
+                        "cropArtworkSquare" to settings.cropArtworkSquare,
+                        "thumbnailCornerRadius" to settings.thumbnailCornerRadius,
                         "lyricsAnimationStyle" to settings.lyricsAnimationStyle,
                         "lyricsPreferLrclib" to settings.lyricsPreferLrclib,
                         "lyricsRomanize" to settings.lyricsRomanize,
@@ -389,12 +400,22 @@ class FoxyFlutterBridge(
                         "recognitionSource" to settings.recognitionSource,
                         "recognitionHistoryLimit" to settings.recognitionHistoryLimit,
                         "homeBackgroundEnabled" to settings.homeBackgroundEnabled,
+                        "defaultOpenTab" to settings.defaultOpenTab,
+                        "quickPicksDisplayMode" to settings.quickPicksDisplayMode,
+                        "showLikedInLibrary" to settings.showLikedInLibrary,
+                        "showDownloadsInLibrary" to settings.showDownloadsInLibrary,
+                        "showHistoryInLibrary" to settings.showHistoryInLibrary,
+                        "showMostPlayedInLibrary" to settings.showMostPlayedInLibrary,
+                        "showPlaylistsInLibrary" to settings.showPlaylistsInLibrary,
+                        "showLocalInLibrary" to settings.showLocalInLibrary,
+                        "showRecognizedInLibrary" to settings.showRecognizedInLibrary,
                         "contentLanguageTag" to settings.contentLanguageTag,
                         "appLanguageTag" to settings.appLanguageTag,
                         "proxyEnabled" to settings.proxyEnabled,
                         "proxyEndpoint" to settings.proxyEndpoint,
                         "normalizeVolume" to settings.normalizeVolume,
                         "skipSilence" to settings.skipSilence,
+                        "autoSkipNextOnError" to settings.autoSkipNextOnError,
                         "autoBackupEnabled" to settings.autoBackupEnabled,
                         "autoCheckUpdates" to settings.autoCheckUpdates,
                         "updateNotifications" to settings.updateNotifications,
@@ -446,6 +467,8 @@ class FoxyFlutterBridge(
                 val bottomNavScale = call.argument<Number>("bottomNavScale")?.toInt()
                 val gridColumns = call.argument<Number>("gridColumns")?.toInt()
                 val showBottomLabels = call.argument<Boolean>("showBottomLabels")
+                val disableAnimations = call.argument<Boolean>("disableAnimations")
+                val hapticFeedback = call.argument<Boolean>("hapticFeedback")
                 val persistentQueue = call.argument<Boolean>("persistentQueue")
                 val saveHistory = call.argument<Boolean>("saveHistory")
                 val sponsorBlockEnabled = call.argument<Boolean>("sponsorBlockEnabled")
@@ -454,7 +477,13 @@ class FoxyFlutterBridge(
                 val playerBackgroundStyle = call.argument<Number>("playerBackgroundStyle")?.toInt()
                 val playerStyle = call.argument<Number>("playerStyle")?.toInt()
                 val playerButtonsStyle = call.argument<Number>("playerButtonsStyle")?.toInt()
+                val miniPlayerStyle = call.argument<Number>("miniPlayerStyle")?.toInt()
+                val bottomNavigationStyle =
+                    call.argument<Number>("bottomNavigationStyle")?.toInt()
                 val playerArtworkShape = call.argument<Number>("playerArtworkShape")?.toInt()
+                val hidePlayerArtwork = call.argument<Boolean>("hidePlayerArtwork")
+                val cropArtworkSquare = call.argument<Boolean>("cropArtworkSquare")
+                val thumbnailCornerRadius = call.argument<Number>("thumbnailCornerRadius")?.toInt()
                 val lyricsAnimationStyle = call.argument<Number>("lyricsAnimationStyle")?.toInt()
                 val lyricsPreferLrclib = call.argument<Boolean>("lyricsPreferLrclib")
                 val lyricsRomanize = call.argument<Boolean>("lyricsRomanize")
@@ -467,12 +496,22 @@ class FoxyFlutterBridge(
                 val recognitionSource = call.argument<Number>("recognitionSource")?.toInt()
                 val recognitionHistoryLimit = call.argument<Number>("recognitionHistoryLimit")?.toInt()
                 val homeBackgroundEnabled = call.argument<Boolean>("homeBackgroundEnabled")
+                val defaultOpenTab = call.argument<Number>("defaultOpenTab")?.toInt()
+                val quickPicksDisplayMode = call.argument<Number>("quickPicksDisplayMode")?.toInt()
+                val showLikedInLibrary = call.argument<Boolean>("showLikedInLibrary")
+                val showDownloadsInLibrary = call.argument<Boolean>("showDownloadsInLibrary")
+                val showHistoryInLibrary = call.argument<Boolean>("showHistoryInLibrary")
+                val showMostPlayedInLibrary = call.argument<Boolean>("showMostPlayedInLibrary")
+                val showPlaylistsInLibrary = call.argument<Boolean>("showPlaylistsInLibrary")
+                val showLocalInLibrary = call.argument<Boolean>("showLocalInLibrary")
+                val showRecognizedInLibrary = call.argument<Boolean>("showRecognizedInLibrary")
                 val contentLanguageTag = call.argument<String>("contentLanguageTag")
                 val appLanguageTag = call.argument<String>("appLanguageTag")
                 val proxyEnabled = call.argument<Boolean>("proxyEnabled")
                 val proxyEndpoint = call.argument<String>("proxyEndpoint")
                 val normalizeVolume = call.argument<Boolean>("normalizeVolume")
                 val skipSilence = call.argument<Boolean>("skipSilence")
+                val autoSkipNextOnError = call.argument<Boolean>("autoSkipNextOnError")
                 val autoBackupEnabled = call.argument<Boolean>("autoBackupEnabled")
                 val autoCheckUpdates = call.argument<Boolean>("autoCheckUpdates")
                 val updateNotifications = call.argument<Boolean>("updateNotifications")
@@ -490,14 +529,22 @@ class FoxyFlutterBridge(
                         bottomNavScale != null ||
                         gridColumns != null ||
                         showBottomLabels != null ||
+                        disableAnimations != null ||
                         playerProgressStyle != null ||
                         playerBackgroundStyle != null ||
                         playerStyle != null ||
                         playerButtonsStyle != null ||
+                        miniPlayerStyle != null ||
+                        bottomNavigationStyle != null ||
                         playerArtworkShape != null ||
+                        hidePlayerArtwork != null ||
+                        cropArtworkSquare != null ||
+                        thumbnailCornerRadius != null ||
                         lyricsAnimationStyle != null ||
                         artworkPriority != null ||
-                        homeBackgroundEnabled != null
+                        homeBackgroundEnabled != null ||
+                        defaultOpenTab != null ||
+                        quickPicksDisplayMode != null
                 FoxySettings.update { current ->
                     current.copy(
                         themePalette = themePalette?.coerceIn(0, FoxyThemePresets.lastIndex) ?: current.themePalette,
@@ -511,6 +558,8 @@ class FoxyFlutterBridge(
                         bottomNavScale = bottomNavScale?.coerceIn(0, 2) ?: current.bottomNavScale,
                         gridColumns = gridColumns?.coerceIn(2, 4) ?: current.gridColumns,
                         showBottomLabels = showBottomLabels ?: current.showBottomLabels,
+                        disableAnimations = disableAnimations ?: current.disableAnimations,
+                        hapticFeedback = hapticFeedback ?: current.hapticFeedback,
                         persistentQueue = persistentQueue ?: current.persistentQueue,
                         saveHistory = saveHistory ?: current.saveHistory,
                         sponsorBlockEnabled = sponsorBlockEnabled ?: current.sponsorBlockEnabled,
@@ -529,8 +578,16 @@ class FoxyFlutterBridge(
                             ?: current.playerStyle,
                         playerButtonsStyle = playerButtonsStyle?.coerceIn(0, 2)
                             ?: current.playerButtonsStyle,
+                        miniPlayerStyle = miniPlayerStyle?.coerceIn(0, 2)
+                            ?: current.miniPlayerStyle,
+                        bottomNavigationStyle = bottomNavigationStyle?.coerceIn(0, 2)
+                            ?: current.bottomNavigationStyle,
                         playerArtworkShape = playerArtworkShape?.coerceIn(0, 2)
                             ?: current.playerArtworkShape,
+                        hidePlayerArtwork = hidePlayerArtwork ?: current.hidePlayerArtwork,
+                        cropArtworkSquare = cropArtworkSquare ?: current.cropArtworkSquare,
+                        thumbnailCornerRadius = thumbnailCornerRadius?.coerceIn(0, 40)
+                            ?: current.thumbnailCornerRadius,
                         lyricsAnimationStyle = lyricsAnimationStyle?.coerceIn(0, 5)
                             ?: current.lyricsAnimationStyle,
                         lyricsPreferLrclib = lyricsPreferLrclib ?: current.lyricsPreferLrclib,
@@ -552,6 +609,22 @@ class FoxyFlutterBridge(
                             ?: current.recognitionHistoryLimit,
                         homeBackgroundEnabled = homeBackgroundEnabled
                             ?: current.homeBackgroundEnabled,
+                        defaultOpenTab = defaultOpenTab?.let { if (it == 1 || it == 3) it else 0 }
+                            ?: current.defaultOpenTab,
+                        quickPicksDisplayMode = quickPicksDisplayMode?.coerceIn(0, 1)
+                            ?: current.quickPicksDisplayMode,
+                        showLikedInLibrary = showLikedInLibrary ?: current.showLikedInLibrary,
+                        showDownloadsInLibrary = showDownloadsInLibrary
+                            ?: current.showDownloadsInLibrary,
+                        showHistoryInLibrary = showHistoryInLibrary
+                            ?: current.showHistoryInLibrary,
+                        showMostPlayedInLibrary = showMostPlayedInLibrary
+                            ?: current.showMostPlayedInLibrary,
+                        showPlaylistsInLibrary = showPlaylistsInLibrary
+                            ?: current.showPlaylistsInLibrary,
+                        showLocalInLibrary = showLocalInLibrary ?: current.showLocalInLibrary,
+                        showRecognizedInLibrary = showRecognizedInLibrary
+                            ?: current.showRecognizedInLibrary,
                         contentLanguageTag = contentLanguageTag?.trim()?.takeIf { it.isNotEmpty() }
                             ?: current.contentLanguageTag,
                         appLanguageTag = appLanguageTag?.let { it.trim() } ?: current.appLanguageTag,
@@ -559,6 +632,8 @@ class FoxyFlutterBridge(
                         proxyEndpoint = proxyEndpoint?.trim() ?: current.proxyEndpoint,
                         normalizeVolume = normalizeVolume ?: current.normalizeVolume,
                         skipSilence = skipSilence ?: current.skipSilence,
+                        autoSkipNextOnError = autoSkipNextOnError
+                            ?: current.autoSkipNextOnError,
                         autoBackupEnabled = autoBackupEnabled ?: current.autoBackupEnabled,
                         autoCheckUpdates = autoCheckUpdates ?: current.autoCheckUpdates,
                         updateNotifications = updateNotifications ?: current.updateNotifications,
@@ -683,6 +758,14 @@ class FoxyFlutterBridge(
                     result.error("no_activity", "Cannot open audio picker", null)
                 } else {
                     act.importLocalAudio(result)
+                }
+            }
+            FoxyFlutterChannels.Methods.IMPORT_LOCAL_FOLDER -> {
+                val act = context as? MainActivity
+                if (act == null) {
+                    result.error("no_activity", "Cannot open folder picker", null)
+                } else {
+                    act.importLocalFolder(result)
                 }
             }
             FoxyFlutterChannels.Methods.SEARCH -> {
@@ -2194,7 +2277,7 @@ private suspend fun resolveArtistProfilePayload(
     val bestProfile = YTMusicApi.searchArtistProfiles(cleanArtist, limit)
         .map { it to artistProfileScore(it, cleanArtist) }
         .maxByOrNull { it.second }
-        ?.takeIf { it.second >= 88 }
+        ?.takeIf { it.second >= 118 }
         ?.first
 
     fun rankSongs(items: List<Song>): List<Song> =
@@ -2230,11 +2313,26 @@ private fun artistProfileScore(profile: ArtistProfileResult, artist: String): In
     val subtitle = normalizeBridgeArtist(profile.subscribers.orEmpty())
     var score = 0
     if (title == target) score += 120
-    if (title.isNotBlank() && (title.contains(target) || target.contains(title))) score += 52
+    if (
+        title.isNotBlank() &&
+            target.isNotBlank() &&
+            title != target &&
+            (title.contains(" $target ") || target.contains(" $title "))
+    ) {
+        score += 28
+    }
     if (profile.browseId.startsWith("UC")) score += 10
     if (subtitle.contains("subscriber")) score += 8
     val blob = "$title $subtitle"
-    if (blob.contains("cover") || blob.contains("karaoke") || blob.contains("lyrics")) score -= 45
+    if (
+        blob.contains("cover") ||
+            blob.contains("karaoke") ||
+            blob.contains("lyrics") ||
+            blob.contains("fan") ||
+            blob.contains("tribute")
+    ) {
+        score -= 65
+    }
     return score
 }
 

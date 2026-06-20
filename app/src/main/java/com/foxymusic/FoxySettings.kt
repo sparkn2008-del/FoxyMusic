@@ -17,6 +17,8 @@ data class FoxyCustomization(
     val bottomNavScale: Int = 0,
     val gridColumns: Int = 2,
     val showBottomLabels: Boolean = true,
+    val disableAnimations: Boolean = false,
+    val hapticFeedback: Boolean = true,
     /** 0 = default, 1 = slim. Legacy values normalize back to 0. */
     val playerProgressStyle: Int = 0,
     /** Legacy: unused. */
@@ -27,8 +29,15 @@ data class FoxyCustomization(
     val playerStyle: Int = 0,
     /** 0 = soft glass, 1 = outline, 2 = solid accent. */
     val playerButtonsStyle: Int = 0,
+    /** 0 = default, 1 = liquid glass, 2 = transparent. */
+    val miniPlayerStyle: Int = 0,
+    /** 0 = default, 1 = liquid glass, 2 = transparent. */
+    val bottomNavigationStyle: Int = 0,
     /** 0 = rounded square, 1 = circle/vinyl, 2 = compact rounded. */
     val playerArtworkShape: Int = 0,
+    val hidePlayerArtwork: Boolean = false,
+    val cropArtworkSquare: Boolean = true,
+    val thumbnailCornerRadius: Int = 16,
     /** 0 = none, 1 = fade, 2 = glow, 3 = slide, 4 = karaoke, 5 = apple. */
     val lyricsAnimationStyle: Int = 1,
     /** Restore last queue and transport state after the app restarts. */
@@ -62,6 +71,16 @@ data class FoxyCustomization(
     val recognitionHistoryLimit: Int = 40,
     /** Use the saved custom wallpaper on Home/Search/Library instead of the default gradient. */
     val homeBackgroundEnabled: Boolean = false,
+    /** 0 = Home, 1 = Search, 3 = Library. */
+    val defaultOpenTab: Int = 0,
+    val quickPicksDisplayMode: Int = 0,
+    val showLikedInLibrary: Boolean = true,
+    val showDownloadsInLibrary: Boolean = true,
+    val showHistoryInLibrary: Boolean = true,
+    val showMostPlayedInLibrary: Boolean = true,
+    val showPlaylistsInLibrary: Boolean = true,
+    val showLocalInLibrary: Boolean = true,
+    val showRecognizedInLibrary: Boolean = true,
     /** BCP-47 tag for catalogue / search bias (stored for future API use). */
     val contentLanguageTag: String = "en-US",
     /** App UI language tag; blank = follow system. */
@@ -73,6 +92,7 @@ data class FoxyCustomization(
     val normalizeVolume: Boolean = false,
     /** Reserved: skip silent segments (UI + persistence; Exo wiring later). */
     val skipSilence: Boolean = false,
+    val autoSkipNextOnError: Boolean = false,
     /** Automatically writes local JSON snapshots when settings/library state changes. */
     val autoBackupEnabled: Boolean = false,
     /** Check GitHub releases on launch (throttled). */
@@ -116,12 +136,19 @@ object FoxySettings {
     private const val BOTTOM_NAV_SCALE = "bottom_nav_scale"
     private const val GRID_COLUMNS = "grid_columns"
     private const val BOTTOM_LABELS = "bottom_labels"
+    private const val DISABLE_ANIMATIONS = "disable_animations"
+    private const val HAPTIC_FEEDBACK = "haptic_feedback"
     private const val PLAYER_PROGRESS_STYLE = "player_progress_style"
     private const val PLAYER_SEEK_MOTION = "player_seek_motion"
     private const val PLAYER_BACKGROUND_STYLE = "player_background_style"
     private const val PLAYER_STYLE = "player_style"
     private const val PLAYER_BUTTONS_STYLE = "player_buttons_style"
+    private const val MINI_PLAYER_STYLE = "mini_player_style"
+    private const val BOTTOM_NAV_STYLE = "bottom_nav_style"
     private const val PLAYER_ARTWORK_SHAPE = "player_artwork_shape"
+    private const val HIDE_PLAYER_ARTWORK = "hide_player_artwork"
+    private const val CROP_ARTWORK_SQUARE = "crop_artwork_square"
+    private const val THUMBNAIL_RADIUS = "thumbnail_corner_radius"
     private const val LYRICS_ANIMATION_STYLE = "lyrics_animation_style"
     private const val PERSISTENT_QUEUE = "persistent_queue"
     private const val CONTINUE_PLAYBACK_DISMISSED = "continue_playback_when_dismissed"
@@ -139,12 +166,22 @@ object FoxySettings {
     private const val RECOGNITION_SOURCE = "recognition_source"
     private const val RECOGNITION_HISTORY_LIMIT = "recognition_history_limit"
     private const val HOME_BACKGROUND_ENABLED = "home_background_enabled"
+    private const val DEFAULT_OPEN_TAB = "default_open_tab"
+    private const val QUICK_PICKS_DISPLAY = "quick_picks_display"
+    private const val SHOW_LIKED_LIBRARY = "show_liked_library"
+    private const val SHOW_DOWNLOADS_LIBRARY = "show_downloads_library"
+    private const val SHOW_HISTORY_LIBRARY = "show_history_library"
+    private const val SHOW_MOST_PLAYED_LIBRARY = "show_most_played_library"
+    private const val SHOW_PLAYLISTS_LIBRARY = "show_playlists_library"
+    private const val SHOW_LOCAL_LIBRARY = "show_local_library"
+    private const val SHOW_RECOGNIZED_LIBRARY = "show_recognized_library"
     private const val CONTENT_LANG = "content_language_tag"
     private const val APP_LANG = "app_language_tag"
     private const val PROXY_ON = "proxy_enabled"
     private const val PROXY_EP = "proxy_endpoint"
     private const val NORM_VOL = "normalize_volume"
     private const val SKIP_SIL = "skip_silence"
+    private const val AUTO_SKIP_ERROR = "auto_skip_error"
     private const val AUTO_BACKUP = "auto_backup"
     private const val AUTO_CHECK_UPDATES = "auto_check_updates"
     private const val UPDATE_NOTIFICATIONS = "update_notifications"
@@ -170,6 +207,8 @@ object FoxySettings {
             bottomNavScale = prefs.getInt(BOTTOM_NAV_SCALE, 0).coerceIn(0, 2),
             gridColumns = prefs.getInt(GRID_COLUMNS, 2).coerceIn(2, 4),
             showBottomLabels = prefs.getBoolean(BOTTOM_LABELS, true),
+            disableAnimations = prefs.getBoolean(DISABLE_ANIMATIONS, false),
+            hapticFeedback = prefs.getBoolean(HAPTIC_FEEDBACK, true),
             playerProgressStyle = normalizePlayerProgressStyle(
                 prefs.getInt(PLAYER_PROGRESS_STYLE, 0),
             ),
@@ -177,7 +216,12 @@ object FoxySettings {
             playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 3),
             playerStyle = prefs.getInt(PLAYER_STYLE, 0).coerceIn(0, 2),
             playerButtonsStyle = prefs.getInt(PLAYER_BUTTONS_STYLE, 0).coerceIn(0, 2),
+            miniPlayerStyle = prefs.getInt(MINI_PLAYER_STYLE, 0).coerceIn(0, 2),
+            bottomNavigationStyle = prefs.getInt(BOTTOM_NAV_STYLE, 0).coerceIn(0, 2),
             playerArtworkShape = prefs.getInt(PLAYER_ARTWORK_SHAPE, 0).coerceIn(0, 2),
+            hidePlayerArtwork = prefs.getBoolean(HIDE_PLAYER_ARTWORK, false),
+            cropArtworkSquare = prefs.getBoolean(CROP_ARTWORK_SQUARE, true),
+            thumbnailCornerRadius = prefs.getInt(THUMBNAIL_RADIUS, 16).coerceIn(0, 40),
             lyricsAnimationStyle = prefs.getInt(LYRICS_ANIMATION_STYLE, 1).coerceIn(0, 5),
             persistentQueue = prefs.getBoolean(PERSISTENT_QUEUE, true),
             continuePlaybackWhenDismissed = prefs.getBoolean(CONTINUE_PLAYBACK_DISMISSED, false),
@@ -200,12 +244,22 @@ object FoxySettings {
             recognitionSource = prefs.getInt(RECOGNITION_SOURCE, 0).coerceIn(0, 1),
             recognitionHistoryLimit = prefs.getInt(RECOGNITION_HISTORY_LIMIT, 40).coerceIn(10, 100),
             homeBackgroundEnabled = prefs.getBoolean(HOME_BACKGROUND_ENABLED, false),
+            defaultOpenTab = prefs.getInt(DEFAULT_OPEN_TAB, 0).let { if (it == 1 || it == 3) it else 0 },
+            quickPicksDisplayMode = prefs.getInt(QUICK_PICKS_DISPLAY, 0).coerceIn(0, 1),
+            showLikedInLibrary = prefs.getBoolean(SHOW_LIKED_LIBRARY, true),
+            showDownloadsInLibrary = prefs.getBoolean(SHOW_DOWNLOADS_LIBRARY, true),
+            showHistoryInLibrary = prefs.getBoolean(SHOW_HISTORY_LIBRARY, true),
+            showMostPlayedInLibrary = prefs.getBoolean(SHOW_MOST_PLAYED_LIBRARY, true),
+            showPlaylistsInLibrary = prefs.getBoolean(SHOW_PLAYLISTS_LIBRARY, true),
+            showLocalInLibrary = prefs.getBoolean(SHOW_LOCAL_LIBRARY, true),
+            showRecognizedInLibrary = prefs.getBoolean(SHOW_RECOGNIZED_LIBRARY, true),
             contentLanguageTag = prefs.getString(CONTENT_LANG, "en-US") ?: "en-US",
             appLanguageTag = prefs.getString(APP_LANG, "").orEmpty(),
             proxyEnabled = prefs.getBoolean(PROXY_ON, false),
             proxyEndpoint = prefs.getString(PROXY_EP, "").orEmpty(),
             normalizeVolume = prefs.getBoolean(NORM_VOL, false),
             skipSilence = prefs.getBoolean(SKIP_SIL, false),
+            autoSkipNextOnError = prefs.getBoolean(AUTO_SKIP_ERROR, false),
             autoBackupEnabled = prefs.getBoolean(AUTO_BACKUP, false),
             autoCheckUpdates = prefs.getBoolean(AUTO_CHECK_UPDATES, true),
             updateNotifications = prefs.getBoolean(UPDATE_NOTIFICATIONS, true),
@@ -230,6 +284,8 @@ object FoxySettings {
             ?.putInt(BOTTOM_NAV_SCALE, next.bottomNavScale)
             ?.putInt(GRID_COLUMNS, next.gridColumns)
             ?.putBoolean(BOTTOM_LABELS, next.showBottomLabels)
+            ?.putBoolean(DISABLE_ANIMATIONS, next.disableAnimations)
+            ?.putBoolean(HAPTIC_FEEDBACK, next.hapticFeedback)
             ?.putInt(
                 PLAYER_PROGRESS_STYLE,
                 normalizePlayerProgressStyle(next.playerProgressStyle),
@@ -238,7 +294,12 @@ object FoxySettings {
             ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 3))
             ?.putInt(PLAYER_STYLE, next.playerStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_BUTTONS_STYLE, next.playerButtonsStyle.coerceIn(0, 2))
+            ?.putInt(MINI_PLAYER_STYLE, next.miniPlayerStyle.coerceIn(0, 2))
+            ?.putInt(BOTTOM_NAV_STYLE, next.bottomNavigationStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_ARTWORK_SHAPE, next.playerArtworkShape.coerceIn(0, 2))
+            ?.putBoolean(HIDE_PLAYER_ARTWORK, next.hidePlayerArtwork)
+            ?.putBoolean(CROP_ARTWORK_SQUARE, next.cropArtworkSquare)
+            ?.putInt(THUMBNAIL_RADIUS, next.thumbnailCornerRadius.coerceIn(0, 40))
             ?.putInt(LYRICS_ANIMATION_STYLE, next.lyricsAnimationStyle.coerceIn(0, 5))
             ?.putBoolean(PERSISTENT_QUEUE, next.persistentQueue)
             ?.putBoolean(CONTINUE_PLAYBACK_DISMISSED, next.continuePlaybackWhenDismissed)
@@ -256,12 +317,22 @@ object FoxySettings {
             ?.putInt(RECOGNITION_SOURCE, next.recognitionSource.coerceIn(0, 1))
             ?.putInt(RECOGNITION_HISTORY_LIMIT, next.recognitionHistoryLimit.coerceIn(10, 100))
             ?.putBoolean(HOME_BACKGROUND_ENABLED, next.homeBackgroundEnabled)
+            ?.putInt(DEFAULT_OPEN_TAB, if (next.defaultOpenTab == 1 || next.defaultOpenTab == 3) next.defaultOpenTab else 0)
+            ?.putInt(QUICK_PICKS_DISPLAY, next.quickPicksDisplayMode.coerceIn(0, 1))
+            ?.putBoolean(SHOW_LIKED_LIBRARY, next.showLikedInLibrary)
+            ?.putBoolean(SHOW_DOWNLOADS_LIBRARY, next.showDownloadsInLibrary)
+            ?.putBoolean(SHOW_HISTORY_LIBRARY, next.showHistoryInLibrary)
+            ?.putBoolean(SHOW_MOST_PLAYED_LIBRARY, next.showMostPlayedInLibrary)
+            ?.putBoolean(SHOW_PLAYLISTS_LIBRARY, next.showPlaylistsInLibrary)
+            ?.putBoolean(SHOW_LOCAL_LIBRARY, next.showLocalInLibrary)
+            ?.putBoolean(SHOW_RECOGNIZED_LIBRARY, next.showRecognizedInLibrary)
             ?.putString(CONTENT_LANG, next.contentLanguageTag)
             ?.putString(APP_LANG, next.appLanguageTag)
             ?.putBoolean(PROXY_ON, next.proxyEnabled)
             ?.putString(PROXY_EP, next.proxyEndpoint)
             ?.putBoolean(NORM_VOL, next.normalizeVolume)
             ?.putBoolean(SKIP_SIL, next.skipSilence)
+            ?.putBoolean(AUTO_SKIP_ERROR, next.autoSkipNextOnError)
             ?.putBoolean(AUTO_BACKUP, next.autoBackupEnabled)
             ?.putBoolean(AUTO_CHECK_UPDATES, next.autoCheckUpdates)
             ?.putBoolean(UPDATE_NOTIFICATIONS, next.updateNotifications)

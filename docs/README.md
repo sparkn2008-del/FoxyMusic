@@ -69,7 +69,7 @@ APKs: `app\build\outputs\apk\release\` (per-ABI splits).
 | File | Contents |
 |------|----------|
 | [changelog.txt](../changelog.txt) | Release notes |
-| [FOXYMUSIC_INSTRUCTIONS.txt](../FOXYMUSIC_INSTRUCTIONS.txt) | Maintainer / agent guide |
+| [FOXYMUSIC_INSTRUCTIONS.txt](../FOXYMUSIC_INSTRUCTIONS.txt) | Maintainer blueprint |
 | [FLUTTER_MIGRATION.md](../FLUTTER_MIGRATION.md) | Compose → Flutter migration notes |
 
 ---

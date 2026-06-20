@@ -24,4 +24,6 @@ From repository root:
 
 APKs: `app/build/outputs/apk/release/`
 
+License: **GPL-3.0**. See **[../LICENSE](../LICENSE)**.
+
 Maintainer details → **[../FOXYMUSIC_INSTRUCTIONS.txt](../FOXYMUSIC_INSTRUCTIONS.txt)**

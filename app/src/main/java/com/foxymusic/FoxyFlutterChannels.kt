@@ -39,6 +39,7 @@ object FoxyFlutterChannels {
         const val DOWNLOAD = "download"
         const val REMOVE_DOWNLOAD = "removeDownload"
         const val IMPORT_LOCAL_AUDIO = "importLocalAudio"
+        const val IMPORT_LOCAL_FOLDER = "importLocalFolder"
         const val SLEEP_TIMER = "sleepTimer"
         const val CANCEL_SLEEP_TIMER = "cancelSleepTimer"
         const val GET_APPEARANCE = "getAppearance"

@@ -27,6 +27,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var bridge: FoxyFlutterBridge? = null
     private var pendingHomeBgResult: MethodChannel.Result? = null
     private var pendingLocalAudioResult: MethodChannel.Result? = null
+    private var pendingLocalFolderResult: MethodChannel.Result? = null
     private var pendingRecognitionResult: MethodChannel.Result? = null
 
     private val pickHomeBackgroundLauncher =
@@ -74,6 +75,30 @@ class MainActivity : FlutterFragmentActivity() {
             lifecycleScope.launch {
                 val response = withContext(Dispatchers.IO) {
                     FoxyLocalMusic.importUris(applicationContext, uris)
+                }
+                bridge?.emitLibraryDownloadsChangedEvent()
+                pending.success(response)
+            }
+        }
+
+    private val importLocalFolderLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            val pending = pendingLocalFolderResult
+            pendingLocalFolderResult = null
+            if (pending == null) return@registerForActivityResult
+            if (uri == null) {
+                pending.success(mapOf("ok" to false, "cancelled" to true, "imported" to 0))
+                return@registerForActivityResult
+            }
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            lifecycleScope.launch {
+                val response = withContext(Dispatchers.IO) {
+                    FoxyLocalMusic.importFolder(applicationContext, uri)
                 }
                 bridge?.emitLibraryDownloadsChangedEvent()
                 pending.success(response)
@@ -149,6 +174,11 @@ class MainActivity : FlutterFragmentActivity() {
     fun importLocalAudio(result: MethodChannel.Result) {
         pendingLocalAudioResult = result
         importLocalAudioLauncher.launch("audio/*")
+    }
+
+    fun importLocalFolder(result: MethodChannel.Result) {
+        pendingLocalFolderResult = result
+        importLocalFolderLauncher.launch(null)
     }
 
     fun startRecognition(result: MethodChannel.Result) {

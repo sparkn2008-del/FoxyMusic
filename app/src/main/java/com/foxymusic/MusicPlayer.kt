@@ -1274,12 +1274,20 @@ object MusicPlayer {
                                 }
                             }
                         } else {
-                            _state.update {
-                                it.copy(
-                                    isPlaying = false,
-                                    isBuffering = false,
-                                    error = error.message ?: "Playback failed"
-                                )
+                            if (FoxySettings.state.value.autoSkipNextOnError && queue.size > 1) {
+                                scope.launch {
+                                    playbackMutex.withLock {
+                                        advanceToNextLocked(loop = false)
+                                    }
+                                }
+                            } else {
+                                _state.update {
+                                    it.copy(
+                                        isPlaying = false,
+                                        isBuffering = false,
+                                        error = error.message ?: "Playback failed"
+                                    )
+                                }
                             }
                         }
                     }

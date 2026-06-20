@@ -3,6 +3,7 @@ package com.foxymusic
 import android.content.Context
 import android.net.Uri
 import android.media.MediaMetadataRetriever
+import android.provider.DocumentsContract
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -53,6 +54,58 @@ object FoxyLocalMusic {
             "ok" to true,
             "imported" to imported.size,
         )
+    }
+
+    fun importFolder(context: Context, treeUri: Uri): Map<String, Any?> {
+        val app = context.applicationContext
+        val audioUris = collectAudioUris(app, treeUri).distinct()
+        if (audioUris.isEmpty()) {
+            return mapOf("ok" to true, "imported" to 0)
+        }
+        return importUris(app, audioUris)
+    }
+
+    private fun collectAudioUris(context: Context, treeUri: Uri): List<Uri> {
+        val rootDocumentId = runCatching {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        }.getOrNull() ?: return emptyList()
+        val out = ArrayList<Uri>()
+        fun walk(documentId: String, depth: Int) {
+            if (depth > 12 || out.size >= 2500) return
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                documentId,
+            )
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            )
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
+                val idIndex = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameIndex = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeIndex = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (c.moveToNext()) {
+                    val childId = c.getString(idIndex)
+                    val name = c.getString(nameIndex).orEmpty()
+                    val mime = c.getString(mimeIndex).orEmpty()
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        walk(childId, depth + 1)
+                    } else if (looksLikeAudio(name, mime)) {
+                        out += DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                    }
+                }
+            }
+        }
+        walk(rootDocumentId, 0)
+        return out
+    }
+
+    private fun looksLikeAudio(name: String, mime: String): Boolean {
+        val lowerMime = mime.lowercase(Locale.US)
+        if (lowerMime.startsWith("audio/")) return true
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+        return ext in audioExtensions
     }
 
     private fun importOne(context: Context, uri: Uri, existing: List<Song>): Song? {

@@ -1,12 +1,12 @@
-FoxyMusic - Maintainer & Agent Blueprint
-========================================
+FoxyMusic - Maintainer Blueprint
+================================
 
 Repository : https://github.com/sparkn2008-del/FoxyMusic
 Stack      : Android Kotlin + Media3 core, Flutter UI in repo root
 Package    : com.foxymusic
 Current    : versionName 1.3.0, versionCode 7
 
-This file is the working blueprint for agents, maintainers, and future UI work.
+This file is the working blueprint for maintainers and future UI work.
 The public README is README.md. Contributor architecture notes also live in
 docs/README.md.
 
@@ -239,8 +239,21 @@ Bottom spacing:
 
 Mini-player:
 
-  Floating glass mini-player sits above bottom nav.
+  Floating mini-player sits above bottom nav.
+  Appearance supports three styles:
+    0 default
+    1 liquid glass
+    2 transparent / clear
+  Icons and transport controls stay the same in every style.
   Avoid full Home rebuilds on progress-only player updates.
+
+Bottom navigation:
+
+  Appearance supports the same three style families as mini-player:
+    0 default
+    1 liquid glass
+    2 transparent / clear
+  Icons stay consistent across styles.
 
 
 HOME FEED SOURCE BLUEPRINT
@@ -281,6 +294,15 @@ Performance rules:
   - Use homeArtwork / thumbnail routes for shelves.
   - Keep player high-quality artwork path separate.
   - Use withTimeoutOrNull around slow optional native feed jobs.
+
+Current Home ordering:
+
+  1. Quick chips row: Moods, Genres, Charts, Downloads, Radio, History.
+  2. Foxy Pick hero.
+  3. Staged shelves.
+
+Charting now is not shown as a duplicate shelf on the default Home feed because
+Charts has its own drill-in route.
 
 
 SEARCH BLUEPRINT
@@ -337,6 +359,7 @@ Collection scopes:
   _scopeMostPlayed
   _scopePlaylists
   _scopeRecognized
+  _scopeLocal
 
 Browse/category scopes:
 
@@ -372,6 +395,16 @@ Downloads:
 
   - Downloads scope shows offline songs and active download progress.
   - Downloaded but forgotten Home shelf should only exist when downloads exist.
+
+Local library:
+
+  - Library -> Local library exposes Add songs and Add folder actions.
+  - MainActivity owns native pickers:
+      importLocalAudio
+      importLocalFolder
+  - FoxyLocalMusic copies selected audio into app storage and extracts metadata.
+  - Supported local formats include FLAC, Opus, OGG, WebM, M4A, MP3, WAV, AAC,
+    and ALAC.
 
 Playlists:
 
@@ -418,7 +451,8 @@ Important working areas:
     Recognition settings and history controls.
 
   Appearance
-    AMOLED/glass treatment, custom Home background.
+    AMOLED/glass treatment, custom Home background, mini-player style, bottom
+    navigation style.
 
   Updates
     Manual update check, auto-check, notifications.
@@ -457,7 +491,8 @@ Current tier intent:
     Target around 320 kbps.
 
   Ultra
-    Prefer streams above 320 kbps when available, especially Opus, FLAC, AAC.
+    Prefer streams above 320 kbps when available, especially FLAC/ALAC/WAV,
+    Opus, and AAC.
     If no 320+ stream exists, pick the best available stream.
 
 Important:

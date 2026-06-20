@@ -28,9 +28,6 @@ const double _kHomeShelfGap = 28.0;
 /// Space between a shelf title and its content.
 const double _kHomeShelfTitleGap = 14.0;
 
-/// Light black veil on transparent chrome (nav, controls, chips).
-const double _kSubtleBlackTint = 0.10;
-
 String _kAppVersionLabel = 'v1.3';
 String _kAppVersionName = '1.3';
 const String _kGitHubProjectUrl = 'https://github.com/sparkn2008-del/FoxyMusic';
@@ -356,6 +353,26 @@ String _cleanDisplayText(dynamic value, {String fallback = ''}) {
       .trim();
   return text.isEmpty ? fallback : text;
 }
+
+String _primaryArtistNameForLookup(String value) {
+  final cleaned = value.replaceAll(RegExp(r'\([^)]*\)|\[[^\]]*\]'), ' ').trim();
+  final parts = cleaned.split(
+    RegExp(
+      r'\s*(?:,|&|/|\+|\bx\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*',
+      caseSensitive: false,
+    ),
+  );
+  return parts
+      .firstWhere((part) => part.trim().isNotEmpty, orElse: () => value)
+      .trim();
+}
+
+String _normalizeArtistLookupKey(String value) =>
+    _primaryArtistNameForLookup(value)
+        .toLowerCase()
+        .replaceAll(RegExp(r'\b(official|topic|vevo|artist|channel)\b'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
 
 int _normalizePlayerProgressStyle(int raw) {
   return 0;
@@ -923,11 +940,13 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
   final ValueNotifier<Map<String, dynamic>> _miniPlayerNotifier =
       ValueNotifier<Map<String, dynamic>>(const {});
   Map<String, dynamic> _account = const {};
+  Map<String, dynamic> _shellSettings = const {};
   StreamSubscription<dynamic>? _sub;
 
   /// Avoid mini player + expanded sheet stacking (and Hero flights from feed art).
   bool _nowPlayingSheetOpen = false;
   Timer? _playbackResyncTimer;
+  bool _appliedDefaultOpenTab = false;
 
   void _schedulePlaybackResync({bool extended = false}) {
     for (final delayMs
@@ -962,6 +981,7 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadAccount();
+    unawaited(_loadShellSettings());
     unawaited(_syncPlayerFromNative());
     _sub = _events.receiveBroadcastStream().listen((dynamic event) {
       final map = _asMap(event);
@@ -975,8 +995,27 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
       } else if (type == 'accountChanged') {
         _SongMenuContextCache.invalidate();
         unawaited(_loadAccount());
+      } else if (type == 'appearanceChanged') {
+        unawaited(_loadShellSettings(applyDefaultTab: false));
       }
     });
+  }
+
+  Future<void> _loadShellSettings({bool applyDefaultTab = true}) async {
+    try {
+      final map = _asMap(await _method.invokeMethod('getAppearance'));
+      if (!mounted || map == null) return;
+      setState(() => _shellSettings = map);
+      if (applyDefaultTab && !_appliedDefaultOpenTab) {
+        final tab = ((map['defaultOpenTab'] ?? 0) as num).toInt();
+        if (tab == 1 || tab == 3) {
+          setState(() => _tabIndex = tab);
+        }
+        _appliedDefaultOpenTab = true;
+      }
+    } catch (_) {
+      if (applyDefaultTab) _appliedDefaultOpenTab = true;
+    }
   }
 
   void _applyPlayerState(Map<String, dynamic> state) {
@@ -1001,6 +1040,13 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
       _miniPlayerNotifier.value = next;
     }
     _syncPlaybackResyncTimer();
+  }
+
+  void _setOptimisticPlayerState(Map<String, dynamic> next) {
+    final detached = _detachPlayerState(next);
+    if (!mounted) return;
+    setState(() => _player = detached);
+    _miniPlayerNotifier.value = detached;
   }
 
   bool _miniPlayerSnapshotChanged(
@@ -1197,17 +1243,16 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
     final index = songs.indexWhere((item) => item.videoId == song.videoId);
     final start = math.max(index, 0);
     if (mounted) {
-      setState(() {
-        _player = _detachPlayerState(<String, dynamic>{
-          ..._player,
-          'currentSong': song.toMap(),
-          'isBuffering': true,
-          'isPlaying': false,
-          'positionMs': 0,
-          'durationMs': 0,
-          'queue': songs.map((item) => item.toMap()).toList(),
-          'queueIndex': start,
-        });
+      _setOptimisticPlayerState(<String, dynamic>{
+        ..._player,
+        'currentSong': song.toMap(),
+        'playerEpoch': DateTime.now().microsecondsSinceEpoch,
+        'isBuffering': true,
+        'isPlaying': false,
+        'positionMs': 0,
+        'durationMs': 0,
+        'queue': songs.map((item) => item.toMap()).toList(),
+        'queueIndex': start,
       });
     }
     await _method.invokeMethod('playQueue', {
@@ -1269,7 +1314,10 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
         );
       },
     ).whenComplete(() {
-      if (mounted) setState(() => _nowPlayingSheetOpen = false);
+      if (!mounted) return;
+      setState(() => _nowPlayingSheetOpen = false);
+      unawaited(_syncPlayerFromNative());
+      _schedulePlaybackResync(extended: true);
     });
   }
 
@@ -1286,6 +1334,14 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
     final miniBottom =
         bottomInset + navShellHeight + (hasThreeButtonNav ? 8.0 : 10.0);
     final homeBottomPadding = bottomInset + navShellHeight + 88.0;
+    final miniStyle = ((_shellSettings['miniPlayerStyle'] ?? 0) as num)
+        .toInt()
+        .clamp(0, 2)
+        .toInt();
+    final navStyle = ((_shellSettings['bottomNavigationStyle'] ?? 0) as num)
+        .toInt()
+        .clamp(0, 2)
+        .toInt();
     final tabs = [
       _HomeTab(
         key: _homeTabKey,
@@ -1381,6 +1437,7 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
                         onOpen: () => _openPlayer(),
                         onResync: _syncPlayerFromNative,
                         glass: true,
+                        style: miniStyle,
                         bottomGap: 0,
                       );
                     },
@@ -1403,7 +1460,7 @@ class _FoxyHomeShellState extends State<FoxyHomeShell>
             }
             setState(() => _tabIndex = index);
           },
-          transparent: true,
+          style: navStyle,
           compact: hasThreeButtonNav,
         ),
       ),
@@ -1415,13 +1472,13 @@ class _FoxyBottomNav extends StatelessWidget {
   const _FoxyBottomNav({
     required this.selectedIndex,
     required this.onSelected,
-    this.transparent = false,
+    this.style = 0,
     this.compact = false,
   });
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
-  final bool transparent;
+  final int style;
   final bool compact;
 
   @override
@@ -1431,6 +1488,9 @@ class _FoxyBottomNav extends StatelessWidget {
       (1, Icons.search_rounded, 'Search'),
       (3, Icons.library_music_rounded, 'Library'),
     ];
+    final navStyle = style.clamp(0, 2);
+    final transparent = navStyle == 2;
+    final liquid = navStyle == 1;
     final navRow = SizedBox(
       height: compact ? 48 : 54,
       child: Row(
@@ -1439,9 +1499,11 @@ class _FoxyBottomNav extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: transparent
+                child: (transparent || liquid)
                     ? _FoxyGlassButton(
-                        blur: true,
+                        blur: liquid,
+                        blurSigma: liquid ? 22 : 0,
+                        tintOpacity: transparent ? 0.02 : 0.24,
                         onTap: () => onSelected(items[i].$1),
                         selected: selectedIndex == items[i].$1,
                         borderRadius: BorderRadius.circular(999),
@@ -1525,15 +1587,28 @@ class _FoxyBottomNav extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.fromLTRB(10, 0, 10, compact ? 4 : 8),
         child: transparent
+            ? Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: compact ? 4 : 5,
+                ),
+                child: navRow,
+              )
+            : liquid
             ? DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(
-                    alpha: 0.22 + _kSubtleBlackTint,
-                  ),
+                  color: Colors.black.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: Colors.white.withValues(alpha: 0.2),
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.04),
+                      blurRadius: 22,
+                      spreadRadius: 1,
+                    ),
+                  ],
                 ),
                 child: Padding(
                   padding: EdgeInsets.symmetric(
@@ -1584,15 +1659,21 @@ class _HomeTab extends StatefulWidget {
 }
 
 class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
-  static const int _initialHomeSections = 4;
-  static const int _homeSectionBatchSize = 4;
+  static const int _initialHomeSections = 2;
+  static const int _warmHomeSections = 4;
+  static const int _homeSectionBatchSize = 2;
 
   List<_SongSection> _sections = _HomeCache.sections;
+  List<_SongSection> _orderedSections = const [];
+  _Song? _spotlightSongCache;
+  Map<String, dynamic> _homeSettings = const {};
   bool _loading = _HomeCache.sections.isEmpty;
   String? _error = _HomeCache.error;
   String _homeChip = 'All';
   int _visibleSectionCount = _initialHomeSections;
   late final ScrollController _homeScrollController;
+  Timer? _homeRevealTimer;
+  StreamSubscription<dynamic>? _homeEvents;
 
   @override
   bool get wantKeepAlive => true;
@@ -1602,8 +1683,18 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     super.initState();
     _homeScrollController = ScrollController()
       ..addListener(_maybeRevealMoreHome);
+    _refreshDerivedHomeSections(_sections);
+    unawaited(_loadHomeSettings());
+    _homeEvents = _events.receiveBroadcastStream().listen((dynamic event) {
+      final map = _asMap(event);
+      if (map?['type']?.toString() == 'appearanceChanged') {
+        unawaited(_loadHomeSettings());
+      }
+    });
     if (_HomeCache.sections.isEmpty) {
       _loadHome();
+    } else {
+      _scheduleStagedHomeReveal();
     }
   }
 
@@ -1612,7 +1703,15 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     _homeScrollController
       ..removeListener(_maybeRevealMoreHome)
       ..dispose();
+    _homeEvents?.cancel();
+    _homeRevealTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadHomeSettings() async {
+    final map = _asMap(await _method.invokeMethod('getAppearance'));
+    if (!mounted || map == null) return;
+    setState(() => _homeSettings = map);
   }
 
   @override
@@ -1640,6 +1739,10 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
           ])) {
             return false;
           }
+          if (_homeChip == 'All' &&
+              _titleHasAny(title, const ['charting now'])) {
+            return false;
+          }
           if (_titleHasAny(title, const ['downloaded but forgotten'])) {
             return section.songs.any((song) => song.isDownloaded);
           }
@@ -1664,21 +1767,57 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     return primary;
   }
 
+  void _refreshDerivedHomeSections(List<_SongSection> sections) {
+    _orderedSections = _curatedHomeSections(
+      sections
+          .where((section) => !_isSuppressedHomeSection(section.title))
+          .toList(growable: false),
+    );
+    _spotlightSongCache = _findSpotlightSong(_orderedSections);
+  }
+
+  _Song? _findSpotlightSong(List<_SongSection> sections) {
+    for (final section in sections) {
+      for (final song in section.songs) {
+        if (song.homeArtwork.isNotEmpty || song.artwork.isNotEmpty) {
+          return song;
+        }
+      }
+    }
+    return null;
+  }
+
+  void _scheduleStagedHomeReveal() {
+    _homeRevealTimer?.cancel();
+    if (_loading || _homeChip != 'All') return;
+    final target = math.min(_warmHomeSections, _orderedSections.length);
+    if (_visibleSectionCount >= target) return;
+    _homeRevealTimer = Timer(const Duration(milliseconds: 90), () {
+      if (!mounted || _loading || _homeChip != 'All') return;
+      setState(() {
+        _visibleSectionCount = math.min(target, _visibleSectionCount + 1);
+      });
+      _scheduleStagedHomeReveal();
+    });
+  }
+
   Future<void> _loadHome({bool force = false}) async {
     final params = _homeFeedParamsForChip(_homeChip);
     final mood = _homeMoodQueryForChip(_homeChip);
     final cacheKey = mood == null ? _homeFeedCacheKey(params) : 'mood:$mood';
     final cachedSections = _HomeCache.sectionsByParams[cacheKey];
     if (!force && cachedSections != null) {
-      final orderedSections = _curatedHomeSections(cachedSections);
       setState(() {
         _sections = cachedSections;
+        _refreshDerivedHomeSections(cachedSections);
         _error = _HomeCache.errorsByParams[cacheKey];
         _loading = false;
-        _visibleSectionCount = _initialVisibleCount(orderedSections.length);
+        _visibleSectionCount = _initialVisibleCount(_orderedSections.length);
       });
+      _scheduleStagedHomeReveal();
       return;
     }
+    _homeRevealTimer?.cancel();
     setState(() {
       _loading = true;
       _error = null;
@@ -1704,12 +1843,13 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
       _HomeCache.sections = sections;
       _HomeCache.error = null;
       if (!mounted) return;
-      final orderedSections = _curatedHomeSections(sections);
       setState(() {
         _sections = sections;
+        _refreshDerivedHomeSections(sections);
         _loading = false;
-        _visibleSectionCount = _initialVisibleCount(orderedSections.length);
+        _visibleSectionCount = _initialVisibleCount(_orderedSections.length);
       });
+      _scheduleStagedHomeReveal();
     } catch (e) {
       _HomeCache.errorsByParams[cacheKey] = e.toString();
       _HomeCache.error = e.toString();
@@ -1722,6 +1862,7 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
   }
 
   void _onHomeChip(String label) {
+    _homeRevealTimer?.cancel();
     setState(() => _homeChip = label);
     unawaited(_loadHome());
   }
@@ -1770,24 +1911,6 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     });
   }
 
-  List<_SongSection> get _feedSections => _sections
-      .where((section) => !_isSuppressedHomeSection(section.title))
-      .toList(growable: false);
-
-  List<_SongSection> get _orderedSections =>
-      _curatedHomeSections(_feedSections);
-
-  _Song? get _spotlightSong {
-    for (final section in _orderedSections) {
-      for (final song in section.songs) {
-        if (song.homeArtwork.isNotEmpty || song.artwork.isNotEmpty) {
-          return song;
-        }
-      }
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
@@ -1804,7 +1927,9 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
     final visibleSections = _homeChip == 'All'
         ? feedSections.take(_visibleSectionCount).toList()
         : categoryFeedSections;
-    final spotlightSong = _homeChip == 'All' ? _spotlightSong : null;
+    final spotlightSong = _homeChip == 'All' ? _spotlightSongCache : null;
+    final quickPicksDisplayMode =
+        ((_homeSettings['quickPicksDisplayMode'] ?? 0) as num).toInt();
     return RefreshIndicator(
       color: accent,
       backgroundColor: const Color(0xFF151515),
@@ -1878,6 +2003,17 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
               ),
             )
           else if (_homeChip == 'All') ...[
+            SliverToBoxAdapter(
+              child: _HomeQuickActionChips(
+                onOpenRadio: () => _onHomeChip('Radio'),
+                onOpenMoods: () => _onHomeChip('Moods'),
+                onOpenGenres: () => _onHomeChip('Genres'),
+                onOpenCharts: () => _onHomeChip('Charts'),
+                onOpenCategories: () => _onHomeChip('Categories'),
+                onOpenDownloads: () => _onHomeChip('Downloads'),
+                onOpenHistory: () => _onHomeChip('History'),
+              ),
+            ),
             if (spotlightSong != null)
               SliverToBoxAdapter(
                 child: _HomeShelfShell(
@@ -1896,29 +2032,21 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
                   ),
                 ),
               ),
-            SliverToBoxAdapter(
-              child: _HomeQuickActionChips(
-                onOpenRadio: () => _onHomeChip('Radio'),
-                onOpenMoods: () => _onHomeChip('Moods'),
-                onOpenGenres: () => _onHomeChip('Genres'),
-                onOpenCharts: () => _onHomeChip('Charts'),
-                onOpenCategories: () => _onHomeChip('Categories'),
-                onOpenDownloads: () => _onHomeChip('Downloads'),
-                onOpenHistory: () => _onHomeChip('History'),
-              ),
-            ),
-            ...visibleSections.map(
-              (sec) => SliverToBoxAdapter(
-                child: _HomeShelfShell(
+            SliverList.builder(
+              itemCount: visibleSections.length,
+              itemBuilder: (context, index) {
+                final sec = visibleSections[index];
+                return _HomeShelfShell(
                   child: _HomeFeedSection(
                     section: sec,
                     layout: _homeSectionLayout(sec),
                     currentVideoId: widget.currentVideoId,
                     onPlay: widget.onPlay,
                     onDiscoverSearch: widget.onDiscoverSearch,
+                    quickPicksDisplayMode: quickPicksDisplayMode,
                   ),
-                ),
-              ),
+                );
+              },
             ),
             if (_visibleSectionCount < feedSections.length)
               const SliverToBoxAdapter(
@@ -1931,18 +2059,21 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
                 onBack: resetToDefault,
               ),
             ),
-            ...categoryFeedSections.map(
-              (sec) => SliverToBoxAdapter(
-                child: _HomeShelfShell(
+            SliverList.builder(
+              itemCount: categoryFeedSections.length,
+              itemBuilder: (context, index) {
+                final sec = categoryFeedSections[index];
+                return _HomeShelfShell(
                   child: _HomeFeedSection(
                     section: sec,
                     layout: _homeSectionLayout(sec),
                     currentVideoId: widget.currentVideoId,
                     onPlay: widget.onPlay,
                     onDiscoverSearch: widget.onDiscoverSearch,
+                    quickPicksDisplayMode: quickPicksDisplayMode,
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ],
           SliverToBoxAdapter(
@@ -4626,6 +4757,7 @@ class _LibraryTabState extends State<_LibraryTab>
   List<_Song> _recentlyAdded = const [];
   List<_UserPlaylist> _userPlaylists = const [];
   List<_RecognizedTrack> _recognized = const [];
+  Map<String, dynamic> _settings = const {};
   int _scope = _lastScope;
   final Map<String, double> _downloadProgress = {};
   StreamSubscription<dynamic>? _libraryEvents;
@@ -4679,10 +4811,15 @@ class _LibraryTabState extends State<_LibraryTab>
   }
 
   Future<void> _load() async {
-    final response =
-        _asMap(await _method.invokeMethod('libraryFeed')) ?? const {};
+    final values = await Future.wait<dynamic>([
+      _method.invokeMethod('libraryFeed'),
+      _method.invokeMethod('getAppearance'),
+    ]);
+    final response = _asMap(values[0]) ?? const {};
+    final settings = _asMap(values[1]) ?? const {};
     if (!mounted) return;
     setState(() {
+      _settings = settings;
       _liked = _songsFrom(response['liked']);
       _history = _songsFrom(response['history']);
       _downloads = _songsFrom(response['downloads']);
@@ -4692,10 +4829,17 @@ class _LibraryTabState extends State<_LibraryTab>
       _userPlaylists = _userPlaylistsFrom(response['userPlaylists']);
       _recognized = _recognizedTracksFrom(response['recognitionHistory']);
       _loading = false;
+      if (!_libraryScopeVisible(_scope)) {
+        _scope = _scopeHub;
+        _lastScope = _scopeHub;
+      }
     });
   }
 
   bool get _hub => _scope == _scopeHub;
+
+  bool _settingBool(String key, [bool fallback = true]) =>
+      _settings[key] == null ? fallback : _settings[key] == true;
 
   List<_Song> get _activeSongs {
     switch (_scope) {
@@ -4741,8 +4885,26 @@ class _LibraryTabState extends State<_LibraryTab>
 
   void _setScope(int scope) {
     final next = scope.clamp(_scopeHub, _scopeLocal).toInt();
+    if (!_libraryScopeVisible(next)) {
+      _lastScope = _scopeHub;
+      setState(() => _scope = _scopeHub);
+      return;
+    }
     _lastScope = next;
     setState(() => _scope = next);
+  }
+
+  bool _libraryScopeVisible(int scope) {
+    return switch (scope) {
+      _scopeLiked => _settingBool('showLikedInLibrary'),
+      _scopeHistory => _settingBool('showHistoryInLibrary'),
+      _scopeDownloads => _settingBool('showDownloadsInLibrary'),
+      _scopeMostPlayed => _settingBool('showMostPlayedInLibrary'),
+      _scopePlaylists => _settingBool('showPlaylistsInLibrary'),
+      _scopeRecognized => _settingBool('showRecognizedInLibrary'),
+      _scopeLocal => _settingBool('showLocalInLibrary'),
+      _ => true,
+    };
   }
 
   void _goHub() => _setScope(_scopeHub);
@@ -4758,6 +4920,36 @@ class _LibraryTabState extends State<_LibraryTab>
     if (_hub) return false;
     _goHub();
     return true;
+  }
+
+  Future<void> _importLocalAudio({required bool folder}) async {
+    try {
+      final response = _asMap(
+        await _method.invokeMethod(
+          folder ? 'importLocalFolder' : 'importLocalAudio',
+        ),
+      );
+      if (!mounted) return;
+      final cancelled = response?['cancelled'] == true;
+      if (cancelled) return;
+      final imported = ((response?['imported'] ?? 0) as num).toInt();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            imported > 0
+                ? 'Imported $imported local songs'
+                : 'No new supported audio found',
+          ),
+        ),
+      );
+      await _load();
+      if (mounted) setState(() => _scope = _scopeLocal);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Import failed: $e')));
+    }
   }
 
   void _openSongOverflow(BuildContext context, _Song song, List<_Song> queue) {
@@ -4867,85 +5059,82 @@ class _LibraryTabState extends State<_LibraryTab>
   }
 
   Widget _hubGrid() {
+    final collectionTiles = <Widget>[
+      if (_libraryScopeVisible(_scopeLiked))
+        _LibraryRichTile(
+          color: const Color(0xFFF48FB1),
+          icon: Icons.favorite_rounded,
+          title: 'Liked',
+          subtitle: '${_liked.length} songs',
+          onTap: () => _setScope(_scopeLiked),
+        ),
+      if (_libraryScopeVisible(_scopeDownloads))
+        _LibraryRichTile(
+          color: const Color(0xFF64B5F6),
+          icon: Icons.download_rounded,
+          title: 'Downloads',
+          subtitle: '${_downloads.length} offline',
+          onTap: () => _setScope(_scopeDownloads),
+        ),
+      if (_libraryScopeVisible(_scopeHistory))
+        _LibraryRichTile(
+          color: const Color(0xFFFFB74D),
+          icon: Icons.history_rounded,
+          title: 'History',
+          subtitle: '${_history.length} played',
+          onTap: () => _setScope(_scopeHistory),
+        ),
+      if (_libraryScopeVisible(_scopeMostPlayed))
+        _LibraryRichTile(
+          color: const Color(0xFF81C784),
+          icon: Icons.trending_up_rounded,
+          title: 'Most played',
+          subtitle: '${_mostPlayed.length} tracks',
+          onTap: () => _setScope(_scopeMostPlayed),
+        ),
+      if (_libraryScopeVisible(_scopeLocal))
+        _LibraryRichTile(
+          color: const Color(0xFF90CAF9),
+          icon: Icons.library_music_rounded,
+          title: 'Local library',
+          subtitle: _local.isEmpty
+              ? 'Device songs'
+              : '${_local.length} local songs',
+          onTap: () => _setScope(_scopeLocal),
+        ),
+      if (_libraryScopeVisible(_scopePlaylists))
+        _LibraryRichTile(
+          color: const Color(0xFFA5D6A7),
+          icon: Icons.playlist_play_rounded,
+          title: 'Playlists',
+          subtitle: '${_userPlaylists.length} saved mixes',
+          onTap: () => _setScope(_scopePlaylists),
+        ),
+    ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _librarySectionTitle('YOUR COLLECTION'),
-          Row(
-            children: [
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFFF48FB1),
-                  icon: Icons.favorite_rounded,
-                  title: 'Liked',
-                  subtitle: '${_liked.length} songs',
-                  onTap: () => _setScope(_scopeLiked),
-                ),
+          if (collectionTiles.isEmpty)
+            Text(
+              'Enable collection shortcuts in Settings.',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.55)),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: collectionTiles.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 1.75,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFF64B5F6),
-                  icon: Icons.download_rounded,
-                  title: 'Downloads',
-                  subtitle: '${_downloads.length} offline',
-                  onTap: () => _setScope(_scopeDownloads),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFFFFB74D),
-                  icon: Icons.history_rounded,
-                  title: 'History',
-                  subtitle: '${_history.length} played',
-                  onTap: () => _setScope(_scopeHistory),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFF81C784),
-                  icon: Icons.trending_up_rounded,
-                  title: 'Most played',
-                  subtitle: '${_mostPlayed.length} tracks',
-                  onTap: () => _setScope(_scopeMostPlayed),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFF90CAF9),
-                  icon: Icons.library_music_rounded,
-                  title: 'Local library',
-                  subtitle: _local.isEmpty
-                      ? 'Device songs'
-                      : '${_local.length} local songs',
-                  onTap: () => _setScope(_scopeLocal),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _LibraryRichTile(
-                  color: const Color(0xFFA5D6A7),
-                  icon: Icons.playlist_play_rounded,
-                  title: 'Playlists',
-                  subtitle: '${_userPlaylists.length} saved mixes',
-                  onTap: () => _setScope(_scopePlaylists),
-                ),
-              ),
-            ],
-          ),
+              itemBuilder: (_, index) => collectionTiles[index],
+            ),
         ],
       ),
     );
@@ -4964,7 +5153,7 @@ class _LibraryTabState extends State<_LibraryTab>
       (Icons.playlist_play_rounded, 'Playlists', _scopePlaylists),
       (Icons.library_music_rounded, 'Local', _scopeLocal),
       (Icons.music_note_rounded, 'Recognized', _scopeRecognized),
-    ];
+    ].where((item) => _libraryScopeVisible(item.$3)).toList(growable: false);
 
     return CustomScrollView(
       key: const PageStorageKey('library-scroll'),
@@ -5067,6 +5256,22 @@ class _LibraryTabState extends State<_LibraryTab>
                     onPressed: () => _createPlaylist(context),
                     icon: const Icon(Icons.add_rounded, size: 18),
                     label: const Text('New'),
+                  ),
+                ] else if (_scope == _scopeLocal) ...[
+                  TextButton.icon(
+                    onPressed: () => _importLocalAudio(folder: false),
+                    icon: const Icon(Icons.library_add_rounded, size: 18),
+                    label: const Text('Songs'),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    tooltip: 'Add folder',
+                    onPressed: () => _importLocalAudio(folder: true),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.1),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.create_new_folder_rounded),
                   ),
                 ] else if (songs.isNotEmpty && _scope != _scopePlaylists) ...[
                   IconButton.filledTonal(
@@ -6859,46 +7064,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
-  Future<void> _editTextSetting({
-    required String title,
-    required String key,
-    required String currentValue,
-    required String hint,
-    String emptyLabel = 'Follow default',
-  }) async {
-    final controller = TextEditingController(text: currentValue);
-    final value = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(hintText: hint),
-          textInputAction: TextInputAction.done,
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ''),
-            child: Text(emptyLabel),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (value == null || !mounted) return;
-    await _apply({key: value});
-  }
-
   Future<void> _runSettingsAction({
     required String method,
     required String success,
@@ -7211,6 +7376,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  void _clearFlutterImageCache() {
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Image cache cleared')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final persistent = _bool('persistentQueue', true);
@@ -7227,12 +7400,20 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final continueDismiss = _bool('continuePlaybackWhenDismissed');
     final romanize = _bool('lyricsRomanize');
     final blurEffects = _bool('blurEffects', true);
-    final showBottomLabels = _bool('showBottomLabels', true);
-    final iconScale = _int('iconScale', 1).clamp(0, 2);
-    final bottomNavScale = _int('bottomNavScale', 0).clamp(0, 2);
-    final gridColumns = _int('gridColumns', 2).clamp(2, 4);
-    final contentLanguageTag = _m['contentLanguageTag']?.toString() ?? 'en-US';
-    final appLanguageTag = _m['appLanguageTag']?.toString() ?? '';
+    final disableAnimations = _bool('disableAnimations');
+    final haptics = _bool('hapticFeedback', true);
+    final playerButtonsStyle = _int('playerButtonsStyle', 0).clamp(0, 2);
+    final miniPlayerStyle = _int('miniPlayerStyle', 0).clamp(0, 2);
+    final bottomNavigationStyle = _int('bottomNavigationStyle', 0).clamp(0, 2);
+    final playerProgressStyle = _int('playerProgressStyle', 0).clamp(0, 1);
+    final hidePlayerArtwork = _bool('hidePlayerArtwork');
+    final cropArtworkSquare = _bool('cropArtworkSquare', true);
+    final thumbnailCornerRadius = _int(
+      'thumbnailCornerRadius',
+      16,
+    ).clamp(0, 40);
+    final defaultOpenTab = _int('defaultOpenTab', 0);
+    final quickPicksDisplayMode = _int('quickPicksDisplayMode', 0).clamp(0, 1);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.88,
@@ -7314,7 +7495,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
                 Expanded(
                   child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
+                    duration: disableAnimations
+                        ? Duration.zero
+                        : const Duration(milliseconds: 180),
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeOutCubic,
                     child: switch (_settingsPage) {
@@ -7337,6 +7520,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       ),
                       _FoxySettingsPage.appearance => _buildAppearanceTab(
                         controller,
+                        playerButtonsStyle: playerButtonsStyle,
+                        miniPlayerStyle: miniPlayerStyle,
+                        bottomNavigationStyle: bottomNavigationStyle,
+                        playerProgressStyle: playerProgressStyle,
+                        hidePlayerArtwork: hidePlayerArtwork,
+                        cropArtworkSquare: cropArtworkSquare,
+                        thumbnailCornerRadius: thumbnailCornerRadius,
                       ),
                       _FoxySettingsPage.lyrics => _buildLyricsSettings(
                         controller,
@@ -7350,12 +7540,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       _FoxySettingsPage.advanced => _buildAdvancedSettings(
                         controller,
                         blurEffects: blurEffects,
-                        showBottomLabels: showBottomLabels,
-                        iconScale: iconScale,
-                        bottomNavScale: bottomNavScale,
-                        gridColumns: gridColumns,
-                        contentLanguageTag: contentLanguageTag,
-                        appLanguageTag: appLanguageTag,
+                        disableAnimations: disableAnimations,
+                        haptics: haptics,
+                        defaultOpenTab: defaultOpenTab,
+                        quickPicksDisplayMode: quickPicksDisplayMode,
                       ),
                       _FoxySettingsPage.about => ListView(
                         key: const ValueKey('settings-about'),
@@ -7754,15 +7942,39 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         ),
         _SettingsCard(
           title: 'Cache cleanup',
-          subtitle: 'Free streaming cache if playback starts feeling stale.',
-          child: OutlinedButton.icon(
-            onPressed: () => _runSettingsAction(
-              method: 'clearStreamCache',
-              success: 'Stream cache cleared',
-              failure: 'Could not clear stream cache',
+          subtitle: 'Free streaming and artwork memory cache.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _runSettingsAction(
+                  method: 'clearStreamCache',
+                  success: 'Stream cache cleared',
+                  failure: 'Could not clear stream cache',
+                ),
+                icon: const Icon(Icons.cleaning_services_rounded, size: 20),
+                label: const Text('Clear stream cache'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _clearFlutterImageCache,
+                icon: const Icon(Icons.image_not_supported_rounded, size: 20),
+                label: const Text('Clear image cache'),
+              ),
+            ],
+          ),
+        ),
+        _SettingsCard(
+          title: 'Playback recovery',
+          subtitle: 'Move past broken streams automatically.',
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _bool('autoSkipNextOnError'),
+            title: const Text('Auto-skip failed songs'),
+            subtitle: const Text(
+              'After one retry fails, Foxy jumps to the next queue item.',
             ),
-            icon: const Icon(Icons.cleaning_services_rounded, size: 20),
-            label: const Text('Clear stream cache'),
+            onChanged: (v) => _apply({'autoSkipNextOnError': v}),
           ),
         ),
         _SettingsCard(
@@ -7833,12 +8045,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   Widget _buildAdvancedSettings(
     ScrollController controller, {
     required bool blurEffects,
-    required bool showBottomLabels,
-    required int iconScale,
-    required int bottomNavScale,
-    required int gridColumns,
-    required String contentLanguageTag,
-    required String appLanguageTag,
+    required bool disableAnimations,
+    required bool haptics,
+    required int defaultOpenTab,
+    required int quickPicksDisplayMode,
   }) {
     return ListView(
       key: const ValueKey('settings-advanced'),
@@ -7847,7 +8057,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       children: [
         _SettingsCard(
           title: 'Performance & motion',
-          subtitle: 'Keep glassy Foxy visuals, but control the heavy bits.',
+          subtitle: 'Control animation, blur, and touch feedback.',
           child: Column(
             children: [
               SwitchListTile(
@@ -7861,128 +8071,95 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                value: showBottomLabels,
-                title: const Text('Bottom navigation labels'),
-                subtitle: const Text('Hide text labels for a lighter nav bar.'),
-                onChanged: (v) => _apply({'showBottomLabels': v}),
+                value: disableAnimations,
+                title: const Text('Reduce animations'),
+                subtitle: const Text(
+                  'Makes settings/page transitions instant.',
+                ),
+                onChanged: (v) => _apply({'disableAnimations': v}),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: haptics,
+                title: const Text('Haptic feedback'),
+                subtitle: const Text('Light vibration on player controls.'),
+                onChanged: (v) => _apply({'hapticFeedback': v}),
               ),
             ],
           ),
         ),
         _SettingsCard(
-          title: 'Layout scale',
-          subtitle: 'Small device tuning for icons, nav, and library grids.',
+          title: 'Launch & home',
+          subtitle: 'Choose where Foxy opens and how quick picks display.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Icon scale',
+                'Default open tab',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.72),
                   fontWeight: FontWeight.w800,
                 ),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final item in const [
-                    (0, 'Small'),
-                    (1, 'Normal'),
-                    (2, 'Large'),
-                  ])
-                    ChoiceChip(
-                      selected: iconScale == item.$1,
-                      label: Text(item.$2),
-                      onSelected: (_) => _apply({'iconScale': item.$1}),
-                    ),
-                ],
+              _SettingsOptionGrid<int>(
+                value: defaultOpenTab == 1 || defaultOpenTab == 3
+                    ? defaultOpenTab
+                    : 0,
+                values: const [0, 1, 3],
+                label: (v) => switch (v) {
+                  1 => 'Search',
+                  3 => 'Library',
+                  _ => 'Home',
+                },
+                icon: (v) => switch (v) {
+                  1 => Icons.search_rounded,
+                  3 => Icons.library_music_rounded,
+                  _ => Icons.home_rounded,
+                },
+                onChanged: (v) => _apply({'defaultOpenTab': v}),
               ),
               const SizedBox(height: 14),
               Text(
-                'Bottom nav scale',
+                'Quick picks layout',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.72),
                   fontWeight: FontWeight.w800,
                 ),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final item in const [
-                    (0, 'Compact'),
-                    (1, 'Normal'),
-                    (2, 'Big'),
-                  ])
-                    ChoiceChip(
-                      selected: bottomNavScale == item.$1,
-                      label: Text(item.$2),
-                      onSelected: (_) => _apply({'bottomNavScale': item.$1}),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Library grid columns',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.72),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final item in const [2, 3, 4])
-                    ChoiceChip(
-                      selected: gridColumns == item,
-                      label: Text('$item'),
-                      onSelected: (_) => _apply({'gridColumns': item}),
-                    ),
-                ],
+              _SettingsOptionGrid<int>(
+                value: quickPicksDisplayMode,
+                values: const [0, 1],
+                label: (v) => v == 1 ? 'List' : 'Cards',
+                icon: (v) => v == 1
+                    ? Icons.view_list_rounded
+                    : Icons.view_carousel_rounded,
+                onChanged: (v) => _apply({'quickPicksDisplayMode': v}),
               ),
             ],
           ),
         ),
         _SettingsCard(
-          title: 'Region & language',
-          subtitle: 'Search/feed bias and future localization hooks.',
+          title: 'Library visibility',
+          subtitle: 'Hide sections you do not use.',
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Content language / region'),
-                subtitle: Text(contentLanguageTag.ifBlank('en-US')),
-                trailing: const Icon(Icons.edit_rounded),
-                onTap: () => _editTextSetting(
-                  title: 'Content language / region',
-                  key: 'contentLanguageTag',
-                  currentValue: contentLanguageTag,
-                  hint: 'Example: en-US, hi-IN',
-                  emptyLabel: 'Use en-US',
+              for (final item in const [
+                ('showLikedInLibrary', 'Liked'),
+                ('showDownloadsInLibrary', 'Downloads'),
+                ('showHistoryInLibrary', 'History'),
+                ('showMostPlayedInLibrary', 'Most played'),
+                ('showPlaylistsInLibrary', 'Playlists'),
+                ('showLocalInLibrary', 'Local library'),
+                ('showRecognizedInLibrary', 'Recognized songs'),
+              ])
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _bool(item.$1, true),
+                  title: Text(item.$2),
+                  onChanged: (v) => _apply({item.$1: v}),
                 ),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('App language tag'),
-                subtitle: Text(
-                  appLanguageTag.trim().isEmpty
-                      ? 'Follow system'
-                      : appLanguageTag,
-                ),
-                trailing: const Icon(Icons.edit_rounded),
-                onTap: () => _editTextSetting(
-                  title: 'App language tag',
-                  key: 'appLanguageTag',
-                  currentValue: appLanguageTag,
-                  hint: 'Blank = follow system',
-                ),
-              ),
             ],
           ),
         ),
@@ -8072,7 +8249,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
-  Widget _buildAppearanceTab(ScrollController controller) {
+  Widget _buildAppearanceTab(
+    ScrollController controller, {
+    required int playerButtonsStyle,
+    required int miniPlayerStyle,
+    required int bottomNavigationStyle,
+    required int playerProgressStyle,
+    required bool hidePlayerArtwork,
+    required bool cropArtworkSquare,
+    required int thumbnailCornerRadius,
+  }) {
     final thumbAccent = _bool('dynamicSongColors');
     final compact = _bool('compactPlayer');
     final gestures = _bool('gestureControls', true);
@@ -8118,26 +8304,147 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final item in const [
-                    (0, 'Blur'),
-                    (1, 'Artwork'),
-                    (2, 'Black'),
-                    (3, 'Video'),
-                  ])
-                    ChoiceChip(
-                      showCheckmark: false,
-                      selected: bgStyle == item.$1,
-                      label: Text(item.$2),
-                      onSelected: (_) =>
-                          _apply({'playerBackgroundStyle': item.$1}),
-                    ),
-                ],
+              _SettingsOptionGrid<int>(
+                value: bgStyle,
+                values: const [0, 1, 2, 3],
+                label: (v) => switch (v) {
+                  1 => 'Artwork',
+                  2 => 'Black',
+                  3 => 'Video',
+                  _ => 'Blur',
+                },
+                icon: (v) => switch (v) {
+                  1 => Icons.image_rounded,
+                  2 => Icons.dark_mode_rounded,
+                  3 => Icons.motion_photos_on_rounded,
+                  _ => Icons.blur_on_rounded,
+                },
+                onChanged: (v) => _apply({'playerBackgroundStyle': v}),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Button style',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 8),
+              _SettingsOptionGrid<int>(
+                value: playerButtonsStyle,
+                values: const [0, 1, 2],
+                label: (v) => switch (v) {
+                  1 => 'Outline',
+                  2 => 'Solid',
+                  _ => 'Glass',
+                },
+                icon: (v) => switch (v) {
+                  1 => Icons.radio_button_unchecked_rounded,
+                  2 => Icons.radio_button_checked_rounded,
+                  _ => Icons.circle_rounded,
+                },
+                onChanged: (v) => _apply({'playerButtonsStyle': v}),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Mini-player style',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _SettingsOptionGrid<int>(
+                value: miniPlayerStyle,
+                values: const [0, 1, 2],
+                label: (v) => switch (v) {
+                  1 => 'Liquid',
+                  2 => 'Clear',
+                  _ => 'Default',
+                },
+                icon: (v) => switch (v) {
+                  1 => Icons.water_drop_rounded,
+                  2 => Icons.opacity_rounded,
+                  _ => Icons.music_note_rounded,
+                },
+                onChanged: (v) => _apply({'miniPlayerStyle': v}),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Bottom navigation style',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _SettingsOptionGrid<int>(
+                value: bottomNavigationStyle,
+                values: const [0, 1, 2],
+                label: (v) => switch (v) {
+                  1 => 'Liquid',
+                  2 => 'Clear',
+                  _ => 'Default',
+                },
+                icon: (v) => switch (v) {
+                  1 => Icons.water_drop_rounded,
+                  2 => Icons.opacity_rounded,
+                  _ => Icons.space_dashboard_rounded,
+                },
+                onChanged: (v) => _apply({'bottomNavigationStyle': v}),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Seek bar',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _SettingsOptionGrid<int>(
+                value: playerProgressStyle,
+                values: const [0, 1],
+                label: (v) => v == 1 ? 'Slim' : 'Standard',
+                icon: (v) => v == 1
+                    ? Icons.remove_rounded
+                    : Icons.horizontal_rule_rounded,
+                onChanged: (v) => _apply({'playerProgressStyle': v}),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: hidePlayerArtwork,
+                title: const Text('Hide full-player artwork'),
+                subtitle: const Text('Keeps lyrics and controls more open.'),
+                onChanged: (v) => _apply({'hidePlayerArtwork': v}),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: cropArtworkSquare,
+                title: const Text('Crop artwork to square'),
+                subtitle: const Text('Turn off to contain wide poster art.'),
+                onChanged: (v) => _apply({'cropArtworkSquare': v}),
+              ),
+              Text(
+                'Artwork corner radius: $thumbnailCornerRadius',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Slider(
+                value: thumbnailCornerRadius.toDouble(),
+                min: 0,
+                max: 40,
+                divisions: 8,
+                label: '$thumbnailCornerRadius',
+                onChanged: (v) => _apply({'thumbnailCornerRadius': v.round()}),
+              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: compact,
@@ -8281,6 +8588,80 @@ enum _FoxySettingsPage {
 
   final String title;
   final String subtitle;
+}
+
+class _SettingsOptionGrid<T> extends StatelessWidget {
+  const _SettingsOptionGrid({
+    required this.value,
+    required this.values,
+    required this.label,
+    required this.icon,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<T> values;
+  final String Function(T value) label;
+  final IconData Function(T value) icon;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: values.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 2.8,
+      ),
+      itemBuilder: (context, index) {
+        final item = values[index];
+        final selected = item == value;
+        return Material(
+          color: selected
+              ? Colors.white.withValues(alpha: 0.12)
+              : Colors.white.withValues(alpha: 0.045),
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => onChanged(item),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: 0.9)
+                      : Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon(item), color: selected ? accent : Colors.white70),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label(item),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _SettingsProfileBanner extends StatelessWidget {
@@ -9003,6 +9384,7 @@ class _HomeFeedSection extends StatelessWidget {
     required this.layout,
     required this.currentVideoId,
     required this.onPlay,
+    required this.quickPicksDisplayMode,
     this.onDiscoverSearch,
   });
 
@@ -9010,6 +9392,7 @@ class _HomeFeedSection extends StatelessWidget {
   final _HomeSectionLayout layout;
   final String currentVideoId;
   final _FoxyOnPlay onPlay;
+  final int quickPicksDisplayMode;
   final void Function(String query)? onDiscoverSearch;
 
   @override
@@ -9019,11 +9402,17 @@ class _HomeFeedSection extends StatelessWidget {
       return const SizedBox.shrink();
     }
     if (section.title.toLowerCase().contains('quick pick')) {
-      return _HomeQuickStartSection(
-        section: section,
-        currentVideoId: currentVideoId,
-        onPlay: onPlay,
-      );
+      return quickPicksDisplayMode == 1
+          ? _HomeQuickStartSection(
+              section: section,
+              currentVideoId: currentVideoId,
+              onPlay: onPlay,
+            )
+          : _HomeQuickPicks(
+              songs: section.songs,
+              currentVideoId: currentVideoId,
+              onPlay: onPlay,
+            );
     }
     return switch (layout) {
       _HomeSectionLayout.square => _HomeSquareSwipeSection(
@@ -9228,7 +9617,7 @@ class _HomeSquareSwipeSection extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
             itemCount: songs.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 13),
             itemBuilder: (context, index) {
               final song = songs[index];
               return _HomeSquareSongCard(
@@ -9439,7 +9828,7 @@ class _HomeMixesSection extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
             itemCount: groups.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 13),
             itemBuilder: (context, index) {
               final group = groups[index];
               final lead = group.first;
@@ -10016,7 +10405,7 @@ class _HomeVideoShelf extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
             itemCount: section.songs.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 13),
             itemBuilder: (context, index) {
               final song = section.songs[index];
               return _HomeVideoCard(
@@ -10379,6 +10768,7 @@ class _MiniPlayer extends StatefulWidget {
     required this.onOpen,
     this.onResync,
     this.glass = false,
+    this.style = 0,
     this.bottomGap = 0,
   });
 
@@ -10386,6 +10776,7 @@ class _MiniPlayer extends StatefulWidget {
   final VoidCallback onOpen;
   final Future<void> Function()? onResync;
   final bool glass;
+  final int style;
   final double bottomGap;
 
   @override
@@ -10586,8 +10977,33 @@ class _MiniPlayerState extends State<_MiniPlayer>
       ),
     );
 
+    final miniStyle = widget.style.clamp(0, 2);
     final Widget shell;
-    if (widget.glass) {
+    if (miniStyle == 2) {
+      shell = playerBody;
+    } else if (miniStyle == 1) {
+      shell = ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.1),
+                  blurRadius: 24,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: playerBody,
+          ),
+        ),
+      );
+    } else if (widget.glass) {
       shell = ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(
@@ -10809,6 +11225,11 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
   late int _tab = widget.initialTab;
   int _progressStyle = 0;
   int _seekMotion = 0;
+  int _playerButtonsStyle = 0;
+  bool _hapticFeedback = true;
+  bool _hidePlayerArtwork = false;
+  bool _cropArtworkSquare = true;
+  double _thumbnailCornerRadius = 16;
   List<_LyricLine> _lyrics = const [];
   String? _lyricsFor;
   String? _lyricsCacheKeyFor;
@@ -10904,8 +11325,16 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
       _progressStyle = _normalizePlayerProgressStyle(
         ((map['playerProgressStyle'] ?? 0) as num).toInt(),
       );
-      _progressStyle = 0;
       _seekMotion = 0;
+      _playerButtonsStyle = ((map['playerButtonsStyle'] ?? 0) as num)
+          .toInt()
+          .clamp(0, 2);
+      _hapticFeedback = map['hapticFeedback'] != false;
+      _hidePlayerArtwork = map['hidePlayerArtwork'] == true;
+      _cropArtworkSquare = map['cropArtworkSquare'] != false;
+      _thumbnailCornerRadius = ((map['thumbnailCornerRadius'] ?? 16) as num)
+          .toDouble()
+          .clamp(0, 40);
       _playerBackgroundStyle = nextBackgroundStyle;
     });
     if (nextBackgroundStyle == 1) {
@@ -11028,10 +11457,12 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
 
   Future<void> _loadArtistArtworkIfNeeded(Map<String, dynamic> player) async {
     final song = _Song.fromMap(_asMap(player['currentSong']) ?? const {});
-    final artist = song.artist.trim();
-    if (artist.isEmpty || _artistArtFor == artist) return;
-    _artistArtFor = artist;
-    final artistKey = artist.toLowerCase();
+    final artist = _primaryArtistNameForLookup(song.artist).trim();
+    final artistKey = _normalizeArtistLookupKey(artist);
+    if (artist.isEmpty || artistKey.isEmpty || _artistArtFor == artistKey) {
+      return;
+    }
+    _artistArtFor = artistKey;
     final cached = _artistArtworkCache[artistKey];
     if (cached != null) {
       setState(() => _artistArtworkUrl = cached.isEmpty ? null : cached);
@@ -11047,8 +11478,12 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
             }),
           ) ??
           const {};
-      if (!mounted || _artistArtFor != artist) return;
-      final artwork = response['artworkUrl']?.toString().trim() ?? '';
+      if (!mounted || _artistArtFor != artistKey) return;
+      final resolvedArtist = response['artist']?.toString().trim() ?? '';
+      final resolvedKey = _normalizeArtistLookupKey(resolvedArtist);
+      final artwork = resolvedKey == artistKey
+          ? (response['artworkUrl']?.toString().trim() ?? '')
+          : '';
       _artistArtworkCache[artistKey] = artwork;
       if (_artistArtworkCache.length > 48) {
         _artistArtworkCache.remove(_artistArtworkCache.keys.first);
@@ -11057,7 +11492,7 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
         _artistArtworkUrl = artwork.isEmpty ? null : artwork;
       });
     } catch (_) {
-      if (!mounted || _artistArtFor != artist) return;
+      if (!mounted || _artistArtFor != artistKey) return;
       setState(() => _artistArtworkUrl = null);
     }
   }
@@ -11436,6 +11871,10 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                                     pageWidth: swipePageWidth,
                                     maxSide: artSide,
                                     liked: _player['songIsLiked'] == true,
+                                    hideArtwork: _hidePlayerArtwork,
+                                    cropArtworkSquare: _cropArtworkSquare,
+                                    thumbnailCornerRadius:
+                                        _thumbnailCornerRadius,
                                     onLike: () => unawaited(_toggleLike(song)),
                                     onShare: () => _shareSongLink(song),
                                     onDownload: song.isDownloaded
@@ -11531,6 +11970,8 @@ class _NowPlayingSheetState extends State<_NowPlayingSheet> {
                               buffering: buffering,
                               prevEnabled: prevEnabled,
                               nextEnabled: nextEnabled,
+                              buttonStyle: _playerButtonsStyle,
+                              hapticFeedback: _hapticFeedback,
                             ),
                             SizedBox(height: controlsLyricsGap),
                             if (_tab != 1)
@@ -11833,6 +12274,8 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
     required this.buffering,
     required this.prevEnabled,
     required this.nextEnabled,
+    required this.buttonStyle,
+    required this.hapticFeedback,
   });
 
   final bool shuffle;
@@ -11841,6 +12284,13 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
   final bool buffering;
   final bool prevEnabled;
   final bool nextEnabled;
+  final int buttonStyle;
+  final bool hapticFeedback;
+
+  void _tap(String method) {
+    if (hapticFeedback) HapticFeedback.lightImpact();
+    _method.invokeMethod(method);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -11861,34 +12311,46 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
 
     Widget mainPlay() {
       const playSize = 140.0;
+      final solid = buttonStyle == 2;
+      final outline = buttonStyle == 1;
       return slot(
         Material(
-          color: Colors.white.withValues(alpha: 0.96),
-          elevation: 8,
+          color: solid
+              ? accent.withValues(alpha: 0.95)
+              : outline
+              ? Colors.transparent
+              : Colors.white.withValues(alpha: 0.96),
+          elevation: outline ? 0 : 8,
           shadowColor: Colors.black45,
           shape: const CircleBorder(),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: () => _method.invokeMethod('togglePlayPause'),
-            child: SizedBox(
+            onTap: () => _tap('togglePlayPause'),
+            child: Container(
               width: playSize,
               height: playSize,
+              decoration: outline
+                  ? BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white70, width: 2),
+                    )
+                  : null,
               child: buffering
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 48,
                         height: 48,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.5,
-                          color: Colors.black38,
+                          color: outline ? Colors.white70 : Colors.black38,
                         ),
                       ),
                     )
                   : Icon(
                       playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                       size: playing ? 64 : 68,
-                      color: Colors.black87,
+                      color: outline ? Colors.white : Colors.black87,
                     ),
             ),
           ),
@@ -11904,7 +12366,7 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
           children: [
             slot(
               iconOnlyBtn(
-                onTap: () => _method.invokeMethod('toggleShuffle'),
+                onTap: () => _tap('toggleShuffle'),
                 icon: Icon(
                   Icons.shuffle_rounded,
                   size: 30,
@@ -11914,9 +12376,7 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
             ),
             slot(
               iconOnlyBtn(
-                onTap: prevEnabled
-                    ? () => _method.invokeMethod('previous')
-                    : null,
+                onTap: prevEnabled ? () => _tap('previous') : null,
                 icon: Icon(
                   Icons.skip_previous_rounded,
                   size: 40,
@@ -11929,7 +12389,7 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
             mainPlay(),
             slot(
               iconOnlyBtn(
-                onTap: nextEnabled ? () => _method.invokeMethod('next') : null,
+                onTap: nextEnabled ? () => _tap('next') : null,
                 icon: Icon(
                   Icons.skip_next_rounded,
                   size: 40,
@@ -11941,7 +12401,7 @@ class _FoxyPlayerControlLayout extends StatelessWidget {
             ),
             slot(
               iconOnlyBtn(
-                onTap: () => _method.invokeMethod('cycleRepeatMode'),
+                onTap: () => _tap('cycleRepeatMode'),
                 icon: Icon(
                   repeatMode == 'One'
                       ? Icons.repeat_one_rounded
@@ -12937,6 +13397,9 @@ class _PlayerArtwork extends StatelessWidget {
     this.useOfflineArtwork = false,
     this.maxSide,
     this.liked = false,
+    this.hideArtwork = false,
+    this.cropArtworkSquare = true,
+    this.thumbnailCornerRadius = 16,
     this.onLike,
   });
 
@@ -12946,6 +13409,9 @@ class _PlayerArtwork extends StatelessWidget {
   final String? offlineArtworkPath;
   final bool useOfflineArtwork;
   final bool liked;
+  final bool hideArtwork;
+  final bool cropArtworkSquare;
+  final double thumbnailCornerRadius;
   final VoidCallback? onLike;
 
   /// Caps artwork so transport rows never collide on narrow devices.
@@ -12958,8 +13424,22 @@ class _PlayerArtwork extends StatelessWidget {
     final base = math.min(w - 18, h * 0.45).clamp(300.0, 760.0);
     final side = maxSide ?? base;
     final artSide = side;
-    final radius = (artSide * 0.06).clamp(12.0, 22.0);
+    final radius = thumbnailCornerRadius.clamp(0.0, 40.0);
     final identity = tag.startsWith('art-') ? tag.substring(4) : tag;
+
+    if (hideArtwork) {
+      return SizedBox(
+        width: side,
+        height: 72,
+        child: Center(
+          child: Icon(
+            Icons.music_note_rounded,
+            size: 44,
+            color: Colors.white.withValues(alpha: 0.55),
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       width: side,
@@ -12981,6 +13461,7 @@ class _PlayerArtwork extends StatelessWidget {
                 identityTag: identity,
                 offlineArtworkPath: offlineArtworkPath,
                 useOfflineArtwork: useOfflineArtwork,
+                fit: cropArtworkSquare ? BoxFit.cover : BoxFit.contain,
               ),
             ),
           ),
@@ -13021,6 +13502,9 @@ class _SwipePlayerPageDeck extends StatelessWidget {
     required this.pageWidth,
     required this.maxSide,
     required this.liked,
+    required this.hideArtwork,
+    required this.cropArtworkSquare,
+    required this.thumbnailCornerRadius,
     required this.onLike,
     required this.onShare,
     required this.onPlaylist,
@@ -13038,6 +13522,9 @@ class _SwipePlayerPageDeck extends StatelessWidget {
   final double pageWidth;
   final double maxSide;
   final bool liked;
+  final bool hideArtwork;
+  final bool cropArtworkSquare;
+  final double thumbnailCornerRadius;
   final VoidCallback onLike;
   final VoidCallback onShare;
   final VoidCallback onPlaylist;
@@ -13107,6 +13594,9 @@ class _SwipePlayerPageDeck extends StatelessWidget {
                       artworkUrl == song.highQualityArtwork,
                   maxSide: maxSide,
                   liked: primary ? liked : false,
+                  hideArtwork: primary && hideArtwork,
+                  cropArtworkSquare: cropArtworkSquare,
+                  thumbnailCornerRadius: thumbnailCornerRadius,
                   onLike: primary ? onLike : null,
                 ),
               ),
@@ -13177,6 +13667,7 @@ class _Artwork extends StatelessWidget {
     this.offlineArtworkPath,
     this.useOfflineArtwork = false,
     this.highQuality = false,
+    this.fit = BoxFit.cover,
   });
 
   final String url;
@@ -13194,6 +13685,7 @@ class _Artwork extends StatelessWidget {
 
   /// Decode more pixels for large now-playing artwork.
   final bool highQuality;
+  final BoxFit fit;
 
   static final Map<String, File> _existingFileCache = <String, File>{};
 
@@ -13267,7 +13759,7 @@ class _Artwork extends StatelessWidget {
           key: ValueKey<String>(cacheKey),
           width: size,
           height: size,
-          fit: BoxFit.cover,
+          fit: fit,
           gaplessPlayback: false,
           filterQuality: highQuality
               ? FilterQuality.high
@@ -13293,7 +13785,7 @@ class _Artwork extends StatelessWidget {
         key: ValueKey<String>(cacheKey),
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        fit: fit,
         gaplessPlayback: false,
         filterQuality: highQuality ? FilterQuality.high : FilterQuality.medium,
         cacheWidth: cachePx,
@@ -13934,8 +14426,11 @@ class _Song {
   final String? localPath;
   final String? offlineArtworkPath;
 
-  String get highQualityArtwork => _upgradeYouTubeArtworkUrl(artwork, videoId);
-  String get homeArtwork => _homeThumbnailArtworkUrl(artwork, videoId);
+  bool get isLocalTrack => videoId.startsWith('local_');
+  String get highQualityArtwork =>
+      isLocalTrack ? artwork : _upgradeYouTubeArtworkUrl(artwork, videoId);
+  String get homeArtwork =>
+      isLocalTrack ? artwork : _homeThumbnailArtworkUrl(artwork, videoId);
 
   Map<String, dynamic> toMap() => {
     'videoId': videoId,

@@ -145,6 +145,8 @@ private fun FoxyCustomization.toBackupJson(): JSONObject = JSONObject().apply {
     put("bottomNavScale", bottomNavScale)
     put("gridColumns", gridColumns)
     put("showBottomLabels", showBottomLabels)
+    put("disableAnimations", disableAnimations)
+    put("hapticFeedback", hapticFeedback)
     put("dynamicSongColors", dynamicSongColors)
     put("saveHistory", saveHistory)
     put("persistentQueue", persistentQueue)
@@ -154,16 +156,32 @@ private fun FoxyCustomization.toBackupJson(): JSONObject = JSONObject().apply {
     put("crossfadeMs", crossfadeMs)
     put("lyricsPreferLrclib", lyricsPreferLrclib)
     put("lyricsRomanize", lyricsRomanize)
+    put("playerButtonsStyle", playerButtonsStyle)
+    put("miniPlayerStyle", miniPlayerStyle)
+    put("bottomNavigationStyle", bottomNavigationStyle)
+    put("hidePlayerArtwork", hidePlayerArtwork)
+    put("cropArtworkSquare", cropArtworkSquare)
+    put("thumbnailCornerRadius", thumbnailCornerRadius)
     put("streamQualityTier", streamQualityTier)
     put("downloadQualityTier", downloadQualityTier)
     put("streamSourcePriority", streamSourcePriority)
     put("homeBackgroundEnabled", homeBackgroundEnabled)
+    put("defaultOpenTab", defaultOpenTab)
+    put("quickPicksDisplayMode", quickPicksDisplayMode)
+    put("showLikedInLibrary", showLikedInLibrary)
+    put("showDownloadsInLibrary", showDownloadsInLibrary)
+    put("showHistoryInLibrary", showHistoryInLibrary)
+    put("showMostPlayedInLibrary", showMostPlayedInLibrary)
+    put("showPlaylistsInLibrary", showPlaylistsInLibrary)
+    put("showLocalInLibrary", showLocalInLibrary)
+    put("showRecognizedInLibrary", showRecognizedInLibrary)
     put("contentLanguageTag", contentLanguageTag)
     put("appLanguageTag", appLanguageTag)
     put("proxyEnabled", proxyEnabled)
     put("proxyEndpoint", proxyEndpoint)
     put("normalizeVolume", normalizeVolume)
     put("skipSilence", skipSilence)
+    put("autoSkipNextOnError", autoSkipNextOnError)
     put("autoBackupEnabled", autoBackupEnabled)
     put("autoCheckUpdates", autoCheckUpdates)
     put("updateNotifications", updateNotifications)
@@ -183,6 +201,11 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
                 .coerceIn(0, 2),
             gridColumns = json.optInt("gridColumns", current.gridColumns).coerceIn(2, 4),
             showBottomLabels = json.optBoolean("showBottomLabels", current.showBottomLabels),
+            disableAnimations = json.optBoolean(
+                "disableAnimations",
+                current.disableAnimations,
+            ),
+            hapticFeedback = json.optBoolean("hapticFeedback", current.hapticFeedback),
             dynamicSongColors = json.optBoolean("dynamicSongColors", current.dynamicSongColors),
             saveHistory = json.optBoolean("saveHistory", current.saveHistory),
             persistentQueue = json.optBoolean("persistentQueue", current.persistentQueue),
@@ -206,6 +229,26 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
                 current.lyricsPreferLrclib,
             ),
             lyricsRomanize = json.optBoolean("lyricsRomanize", current.lyricsRomanize),
+            playerButtonsStyle = json.optInt("playerButtonsStyle", current.playerButtonsStyle)
+                .coerceIn(0, 2),
+            miniPlayerStyle = json.optInt("miniPlayerStyle", current.miniPlayerStyle)
+                .coerceIn(0, 2),
+            bottomNavigationStyle = json.optInt(
+                "bottomNavigationStyle",
+                current.bottomNavigationStyle,
+            ).coerceIn(0, 2),
+            hidePlayerArtwork = json.optBoolean(
+                "hidePlayerArtwork",
+                current.hidePlayerArtwork,
+            ),
+            cropArtworkSquare = json.optBoolean(
+                "cropArtworkSquare",
+                current.cropArtworkSquare,
+            ),
+            thumbnailCornerRadius = json.optInt(
+                "thumbnailCornerRadius",
+                current.thumbnailCornerRadius,
+            ).coerceIn(0, 40),
             streamQualityTier = json.optInt("streamQualityTier", current.streamQualityTier)
                 .coerceIn(0, 4),
             downloadQualityTier = json.optInt("downloadQualityTier", current.downloadQualityTier)
@@ -216,6 +259,40 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
                 "homeBackgroundEnabled",
                 current.homeBackgroundEnabled,
             ),
+            defaultOpenTab = json.optInt("defaultOpenTab", current.defaultOpenTab)
+                .let { if (it == 1 || it == 3) it else 0 },
+            quickPicksDisplayMode = json.optInt(
+                "quickPicksDisplayMode",
+                current.quickPicksDisplayMode,
+            ).coerceIn(0, 1),
+            showLikedInLibrary = json.optBoolean(
+                "showLikedInLibrary",
+                current.showLikedInLibrary,
+            ),
+            showDownloadsInLibrary = json.optBoolean(
+                "showDownloadsInLibrary",
+                current.showDownloadsInLibrary,
+            ),
+            showHistoryInLibrary = json.optBoolean(
+                "showHistoryInLibrary",
+                current.showHistoryInLibrary,
+            ),
+            showMostPlayedInLibrary = json.optBoolean(
+                "showMostPlayedInLibrary",
+                current.showMostPlayedInLibrary,
+            ),
+            showPlaylistsInLibrary = json.optBoolean(
+                "showPlaylistsInLibrary",
+                current.showPlaylistsInLibrary,
+            ),
+            showLocalInLibrary = json.optBoolean(
+                "showLocalInLibrary",
+                current.showLocalInLibrary,
+            ),
+            showRecognizedInLibrary = json.optBoolean(
+                "showRecognizedInLibrary",
+                current.showRecognizedInLibrary,
+            ),
             contentLanguageTag = json.optString(
                 "contentLanguageTag",
                 current.contentLanguageTag,
@@ -225,6 +302,10 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
             proxyEndpoint = json.optString("proxyEndpoint", current.proxyEndpoint),
             normalizeVolume = json.optBoolean("normalizeVolume", current.normalizeVolume),
             skipSilence = json.optBoolean("skipSilence", current.skipSilence),
+            autoSkipNextOnError = json.optBoolean(
+                "autoSkipNextOnError",
+                current.autoSkipNextOnError,
+            ),
             autoBackupEnabled = json.optBoolean("autoBackupEnabled", current.autoBackupEnabled),
             autoCheckUpdates = json.optBoolean("autoCheckUpdates", current.autoCheckUpdates),
             updateNotifications = json.optBoolean(
