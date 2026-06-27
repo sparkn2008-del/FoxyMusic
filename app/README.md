@@ -1,6 +1,6 @@
 # FoxyMusic — Android app module
 
-Native Kotlin layer for **FoxyMusic**: Media3 playback, Flutter bridge, downloads, recognition, and notifications.
+Native Kotlin layer for **FoxyMusic**: Media3 playback, Flutter bridge, downloads, recognition, remote-config cache, and notifications.
 
 The full project README (features, downloads, screenshots) is at **[../README.md](../README.md)**.
 
@@ -13,6 +13,7 @@ The full project README (features, downloads, screenshots) is at **[../README.md
 | `MusicPlayer.kt` | ExoPlayer queue & transport |
 | `FoxyMediaSessionService.kt` | Foreground player + notification |
 | `YTMusicApi.kt` | Browse / search / home sections |
+| `FoxySettings.kt` | Persisted appearance, playback, quality, and library settings |
 
 ## Build
 

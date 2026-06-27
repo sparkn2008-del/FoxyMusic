@@ -4,7 +4,7 @@ FoxyMusic - Maintainer Blueprint
 Repository : https://github.com/sparkn2008-del/FoxyMusic
 Stack      : Android Kotlin + Media3 core, Flutter UI in repo root
 Package    : com.foxymusic
-Current    : versionName 1.3.0, versionCode 7
+Current    : versionName 1.3.1, versionCode 8
 
 This file is the working blueprint for maintainers and future UI work.
 The public README is README.md. Contributor architecture notes also live in
@@ -26,7 +26,10 @@ IMPORTANT FILES
 ---------------
 Flutter
   lib/main.dart
-    Main app shell, Home, Search, Library, Settings, mini-player, now playing.
+    Main app shell, Home, Search, Library, Settings, mini-player chrome.
+
+  lib/player_now_playing.dart
+    Now playing sheet, player background modes, lyrics preview, player details.
 
   lib/foxy_startup_splash.dart
     Startup splash animation.
@@ -123,6 +126,10 @@ Important methods:
   pickHomeBackground / clearHomeBackground
     Native image picker and custom Home background storage.
 
+  getRemoteConfigCache / setRemoteConfigCache / clearRemoteConfigCache
+    Native cache for foxy_remote_config.json. Flutter loads cached config first,
+    then refreshes from GitHub without blocking first paint.
+
   startRecognition / stopRecognition / getRecognitionHistory
     Music recognition flow.
 
@@ -172,15 +179,17 @@ Initial load behavior:
 
 Top structure:
 
-  1. Foxy Pick hero
+  1. Signed-out Foxy Pick hero
      _HomeSpotlight
      Large rounded rectangle, currently compacted from the original oversized
      version. Uses clear artwork, not heavy blur. Contains title, artist, Play,
      and Radio.
 
+     Signed-in Home can skip this via remote config and start with Quick picks.
+
   2. Quick chips
      _HomeQuickActionChips
-     Moods, Genres, Charts, Downloads, Radio, History.
+     Moods, Genres, Charts, Categories, Downloads, Radio, History.
 
      Moods/Genres/Charts route into Library category drill-ins:
        _LibraryTabState.scopeMoods
@@ -281,7 +290,8 @@ Current feed shape:
   - Hybrid personalized shelves from history/library.
   - Search/recommendation fallback rows from YTMusicApi.
   - Featured artists section from YTMusicApi.searchArtistProfiles.
-  - Downloaded but forgotten appears only when downloaded songs exist.
+  - Downloaded but forgotten is not shown on the default Home feed.
+    Downloads live behind the quick chip / Library route.
   - Repetitive shelves such as Most replayed / Today on Foxy / High quality
     picks should be merged conceptually into Resume/Foxy Picks where possible.
 
@@ -295,14 +305,35 @@ Performance rules:
   - Keep player high-quality artwork path separate.
   - Use withTimeoutOrNull around slow optional native feed jobs.
 
-Current Home ordering:
+Current default Home ordering:
 
   1. Quick chips row: Moods, Genres, Charts, Downloads, Radio, History.
-  2. Foxy Pick hero.
-  3. Staged shelves.
+  2. Signed-out: Foxy Pick hero.
+  3. Signed-in: Quick picks, then New releases.
+  4. Staged shelves.
 
 Charting now is not shown as a duplicate shelf on the default Home feed because
 Charts has its own drill-in route.
+
+Remote config:
+
+  foxy_remote_config.json is served from the repository root through GitHub raw.
+  The app reads cached config immediately, then fetches the latest version.
+  This supports small live tuning after users have installed a build containing
+  remote config support. It does not replace normal app updates for code/UI
+  logic changes.
+
+  Current keys:
+    enabled
+    home.signedInHeroMode
+    home.sectionOrder
+    home.maxGridItems
+    home.cardScale
+    home.gradientStrength
+    features.soundCloudSearch
+    features.videoBackground
+    media.thumbnailSize
+    search.timeoutMs
 
 
 SEARCH BLUEPRINT

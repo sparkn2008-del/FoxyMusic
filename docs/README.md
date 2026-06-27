@@ -12,7 +12,7 @@ FoxyMusic is an **Android** hybrid:
 
 | Layer | Technology | Responsibility |
 |-------|------------|----------------|
-| UI | Flutter (`lib/`) | Home, search, library, player, settings |
+| UI | Flutter (`lib/`) | Home, search, library, player, settings, remote-config consumption |
 | Core | Kotlin | Media3, queue, downloads, bridge, updater |
 | API | Kotlin | YouTube Music browse/search/stream |
 
@@ -29,7 +29,7 @@ The repo root is both the **Gradle Android project** and the **Flutter module** 
 
 Implementation: `FoxyFlutterChannels.kt`, `FoxyFlutterBridge.kt`.
 
-Notable methods: `getPlayerState`, `getAppearance`, `setAppearance`, `playQueue`, `checkGitHubRelease`, `getAppVersion`, `openExternalUrl`, recognition APIs.
+Notable methods: `getPlayerState`, `getAppearance`, `setAppearance`, `playQueue`, `checkGitHubRelease`, `getAppVersion`, `openExternalUrl`, remote-config cache APIs, recognition APIs.
 
 Notable events: `playerState`, `appearanceChanged`, `updateAvailable`, `libraryFeedChanged`, `recognitionResult`.
 
@@ -42,7 +42,17 @@ Notable events: `playerState`, `appearanceChanged`, `updateAvailable`, `libraryF
 | File | Role |
 |------|------|
 | `lib/main.dart` | Primary UI shell |
+| `lib/player_now_playing.dart` | Split now playing sheet and player visuals |
 | `lib/foxy_startup_splash.dart` | Animated splash |
+
+---
+
+## Remote config
+
+`foxy_remote_config.json` is served from the repository root through GitHub raw.
+Flutter loads the cached copy first through the Kotlin bridge, then refreshes in
+the background. Use it for small Home/feed/feature tuning only; code, assets, and
+new UI still require a normal app update.
 
 ---
 

@@ -96,11 +96,11 @@
     <td width="50%" valign="top">
 
 #### Home & search
-- Personalized home feed shelves
-- Foxy Pick, Resume your vibe, Foxy Picks, India Pulse
-- Moods, genres, and charts explore rails
-- Rich search: songs, albums, artists, videos, playlists
-- Artist pages & related picks
+- Fast personalized Home with staged shelves and skeleton loading
+- Signed-in Home starts with Quick picks, then New releases
+- Moods, genres, charts, categories, downloads, radio, and history drill-ins
+- Rich mixed search across songs, videos, albums, artists, and playlists
+- Artist pages with artist-made songs and queue playback
 
 </td>
     <td width="50%" valign="top">
@@ -110,6 +110,7 @@
 - Frosted-glass chrome & AMOLED-friendly dark theme
 - Dynamic accent colors from artwork
 - Animated splash, mini-player styles, and bottom navigation styles
+- Remote config for small Home/feed/feature tuning without reinstall
 - In-app GitHub update checks + notifications
 
 </td>
@@ -133,7 +134,7 @@
 
 <br/>
 
-**Current version:** `1.3.0` (versionCode `7`)
+**Current version:** `1.3.1` (versionCode `8`)
 
 </div>
 
@@ -174,11 +175,12 @@ flutter analyze lib/
 | Path | Role |
 |------|------|
 | `app/` | Android module — player, bridge, downloads, recognition, updater |
-| `lib/` | Flutter UI — `main.dart`, now playing surfaces, splash |
+| `lib/` | Flutter UI — `main.dart`, split now playing sheet, splash |
 | `assets/images/` | Branding, splash frames, home art |
 | `gradle/` + `gradlew.bat` | Gradle wrapper |
 | `changelog.txt` | User-facing release notes |
 | `FOXYMUSIC_INSTRUCTIONS.txt` | Maintainer blueprint |
+| `foxy_remote_config.json` | Remote-config defaults served from repo root |
 | `docs/README.md` | Extended architecture notes |
 
 ---
@@ -233,7 +235,7 @@ No for basic streaming in supported regions — it uses the same class of endpoi
 Kotlin keeps playback rock-solid (Media3, foreground service, downloads). Flutter makes rich scrolling UI and player sheets faster to iterate.
 
 **Where do I change the home feed order?**  
-Kotlin: `FoxyFlutterBridge.kt` (section assembly) and `YTMusicApi.kt`. Dart layout: `_homeSectionLayout()` in `lib/main.dart`.
+For small live tuning, update `foxy_remote_config.json` on GitHub. For code-level feed changes, edit `FoxyFlutterBridge.kt`, `YTMusicApi.kt`, and `_homeSectionLayout()` in `lib/main.dart`.
 
 **How do updates work?**  
 The app compares `versionName` to GitHub `releases/latest`, auto-checks every ~24h, and can notify once per new tag. Manual check lives in Settings.

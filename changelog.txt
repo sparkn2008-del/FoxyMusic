@@ -1,3 +1,13 @@
+v1.3.1 (versionCode 8) - June 2026
+-----------------------------------
+- Added remote config support for small Home/feed/feature tuning after install
+- Reworked signed-in Home ordering: Quick picks first, then New releases
+- Split now playing sheet into its own Flutter part for smoother iteration
+- Improved player sheet gestures, mini-player sync, and live progress updates
+- Refined liquid/tinted bottom chrome and removed redundant visual controls
+- Improved mixed search, artist pages, thumbnail fallback, and artwork quality paths
+- Updated login flow, settings layout, quality selectors, and local library entry points
+
 v1.3.0 (versionCode 7) - June 2026
 -----------------------------------
 - Flutter-first home: tuned shelf spacing, resume your vibe as horizontal rail
