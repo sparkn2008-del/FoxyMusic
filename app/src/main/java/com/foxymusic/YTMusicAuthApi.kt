@@ -17,6 +17,13 @@ data class YtmRemotePlaylistSummary(
     val songCount: Int,
 )
 
+data class YtmAccountProfile(
+    val name: String,
+    val email: String,
+    val avatarUrl: String,
+    val pageId: String = "",
+)
+
 /**
  * Authenticated YouTube Music Innertube calls (cookies + SAPISIDHASH).
  * Used for account playlists: list, create, add tracks, rename, delete.
@@ -47,9 +54,23 @@ object YTMusicAuthApi {
         return st.cookie to auth
     }
 
+    private fun authForCookieOrNull(cookie: String): Pair<String, String>? {
+        val clean = cookie.trim()
+        if (clean.isBlank() || !clean.parseCookies().containsKey("SAPISID")) return null
+        val auth = clean.sapisidHashHeader() ?: return null
+        return clean to auth
+    }
+
     private suspend fun postAuthed(endpoint: String, inner: JSONObject): JSONObject? =
+        postAuthedWithCookie(authOrNull(), endpoint, inner)
+
+    private suspend fun postAuthedWithCookie(
+        authPair: Pair<String, String>?,
+        endpoint: String,
+        inner: JSONObject,
+    ): JSONObject? =
         withContext(Dispatchers.IO) {
-            val (cookie, authorization) = authOrNull() ?: return@withContext null
+            val (cookie, authorization) = authPair ?: return@withContext null
             runCatching {
                 val payload = JSONObject().apply {
                     put("context", clientContext())
@@ -81,6 +102,15 @@ object YTMusicAuthApi {
         }
 
     fun playlistIdForApi(id: String): String = id.removePrefix("VL")
+
+    suspend fun fetchAccountProfiles(cookie: String = FoxyAccount.state.value.cookie): List<YtmAccountProfile> {
+        val json = postAuthedWithCookie(
+            authForCookieOrNull(cookie),
+            "account/account_menu",
+            JSONObject(),
+        ) ?: return emptyList()
+        return parseAccountProfiles(json)
+    }
 
     suspend fun fetchLibraryPlaylists(limit: Int = 80): List<YtmRemotePlaylistSummary> {
         val json = postAuthed(
@@ -151,6 +181,110 @@ object YTMusicAuthApi {
     }
 
     // --- parsing ---
+
+    private fun parseAccountProfiles(root: JSONObject): List<YtmAccountProfile> {
+        val profiles = LinkedHashMap<String, YtmAccountProfile>()
+        walkJson(root) { obj ->
+            val email = textCandidate(obj, "email")
+                .ifBlank { obj.optString("email").trim() }
+                .ifBlank { findEmailInObject(obj) }
+            if (email.isBlank()) return@walkJson
+            val name = textCandidate(obj, "accountName")
+                .ifBlank { textCandidate(obj, "name") }
+                .ifBlank { obj.optString("name").trim() }
+                .ifBlank { email.substringBefore("@") }
+            val avatar = thumbnailCandidate(obj)
+            val pageId = browseIdCandidate(obj)
+            profiles[email] = YtmAccountProfile(
+                name = name,
+                email = email,
+                avatarUrl = avatar,
+                pageId = pageId,
+            )
+        }
+        if (profiles.isNotEmpty()) return profiles.values.toList()
+        val fallbackEmail = findEmailInObject(root)
+        if (fallbackEmail.isBlank()) return emptyList()
+        return listOf(
+            YtmAccountProfile(
+                name = findLikelyName(root).ifBlank { fallbackEmail.substringBefore("@") },
+                email = fallbackEmail,
+                avatarUrl = thumbnailCandidate(root),
+                pageId = browseIdCandidate(root),
+            ),
+        )
+    }
+
+    private fun textCandidate(obj: JSONObject, key: String): String {
+        val raw = obj.opt(key) ?: return ""
+        return when (raw) {
+            is String -> raw.trim()
+            is JSONObject -> raw.runsText().ifBlank { raw.optString("simpleText").trim() }
+            else -> ""
+        }
+    }
+
+    private fun findEmailInObject(obj: Any?): String {
+        val emailRegex = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
+        var found = ""
+        fun walk(value: Any?) {
+            if (found.isNotBlank()) return
+            when (value) {
+                is JSONObject -> {
+                    val keys = value.keys()
+                    while (keys.hasNext()) walk(value.opt(keys.next()))
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.opt(i))
+                is String -> found = emailRegex.find(value)?.value.orEmpty()
+            }
+        }
+        walk(obj)
+        return found
+    }
+
+    private fun findLikelyName(root: JSONObject): String {
+        var found = ""
+        walkJson(root) { obj ->
+            if (found.isNotBlank()) return@walkJson
+            found = textCandidate(obj, "accountName")
+                .ifBlank { textCandidate(obj, "name") }
+                .ifBlank { obj.optString("name").trim() }
+        }
+        return found
+    }
+
+    private fun thumbnailCandidate(obj: JSONObject): String {
+        fun fromThumbObject(thumb: JSONObject?): String {
+            val arr = thumb?.optJSONArray("thumbnails") ?: return ""
+            var best = ""
+            var bestWidth = -1
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val url = item.optString("url").trim()
+                val width = item.optInt("width", 0)
+                if (url.isNotBlank() && width >= bestWidth) {
+                    best = url
+                    bestWidth = width
+                }
+            }
+            return best
+        }
+        return fromThumbObject(obj.optJSONObject("accountPhoto"))
+            .ifBlank { fromThumbObject(obj.optJSONObject("avatar")) }
+            .ifBlank { fromThumbObject(obj.optJSONObject("thumbnail")) }
+    }
+
+    private fun browseIdCandidate(obj: JSONObject): String {
+        obj.optJSONObject("navigationEndpoint")
+            ?.optJSONObject("browseEndpoint")
+            ?.optString("browseId")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        obj.optString("browseId").trim().takeIf { it.isNotBlank() }?.let { return it }
+        obj.optString("pageId").trim().takeIf { it.isNotBlank() }?.let { return it }
+        return ""
+    }
 
     private fun parsePlaylistSummaries(root: JSONObject, limit: Int): List<YtmRemotePlaylistSummary> {
         val map = LinkedHashMap<String, YtmRemotePlaylistSummary>()

@@ -157,6 +157,7 @@ private fun FoxyCustomization.toBackupJson(): JSONObject = JSONObject().apply {
     put("lyricsPreferLrclib", lyricsPreferLrclib)
     put("lyricsRomanize", lyricsRomanize)
     put("playerButtonsStyle", playerButtonsStyle)
+    put("enableLiquidGlassLayout", enableLiquidGlassLayout)
     put("miniPlayerStyle", miniPlayerStyle)
     put("bottomNavigationStyle", bottomNavigationStyle)
     put("hidePlayerArtwork", hidePlayerArtwork)
@@ -231,6 +232,10 @@ private fun FoxySettings.restoreFromBackupJson(json: JSONObject) {
             lyricsRomanize = json.optBoolean("lyricsRomanize", current.lyricsRomanize),
             playerButtonsStyle = json.optInt("playerButtonsStyle", current.playerButtonsStyle)
                 .coerceIn(0, 2),
+            enableLiquidGlassLayout = json.optBoolean(
+                "enableLiquidGlassLayout",
+                current.enableLiquidGlassLayout,
+            ),
             miniPlayerStyle = json.optInt("miniPlayerStyle", current.miniPlayerStyle)
                 .coerceIn(0, 2),
             bottomNavigationStyle = json.optInt(

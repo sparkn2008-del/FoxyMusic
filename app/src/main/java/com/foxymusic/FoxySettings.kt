@@ -29,6 +29,8 @@ data class FoxyCustomization(
     val playerStyle: Int = 0,
     /** 0 = soft glass, 1 = outline, 2 = solid accent. */
     val playerButtonsStyle: Int = 0,
+    /** Single switch for the iPhone-style liquid glass shell treatment. */
+    val enableLiquidGlassLayout: Boolean = false,
     /** 0 = default, 1 = liquid glass, 2 = transparent. */
     val miniPlayerStyle: Int = 0,
     /** 0 = default, 1 = liquid glass, 2 = transparent. */
@@ -69,6 +71,8 @@ data class FoxyCustomization(
     val recognitionSource: Int = 0,
     /** Local recognition history cap. */
     val recognitionHistoryLimit: Int = 40,
+    /** Experimental adaptive thumbnail glow on Home section headers. */
+    val experimentalHomeHeaderAccent: Boolean = false,
     /** Use the saved custom wallpaper on Home/Search/Library instead of the default gradient. */
     val homeBackgroundEnabled: Boolean = false,
     /** 0 = Home, 1 = Search, 3 = Library. */
@@ -143,6 +147,7 @@ object FoxySettings {
     private const val PLAYER_BACKGROUND_STYLE = "player_background_style"
     private const val PLAYER_STYLE = "player_style"
     private const val PLAYER_BUTTONS_STYLE = "player_buttons_style"
+    private const val ENABLE_LIQUID_GLASS_LAYOUT = "enable_liquid_glass_layout"
     private const val MINI_PLAYER_STYLE = "mini_player_style"
     private const val BOTTOM_NAV_STYLE = "bottom_nav_style"
     private const val PLAYER_ARTWORK_SHAPE = "player_artwork_shape"
@@ -165,6 +170,7 @@ object FoxySettings {
     private const val ARTWORK_PRIORITY = "artwork_priority"
     private const val RECOGNITION_SOURCE = "recognition_source"
     private const val RECOGNITION_HISTORY_LIMIT = "recognition_history_limit"
+    private const val EXPERIMENTAL_HOME_HEADER_ACCENT = "experimental_home_header_accent"
     private const val HOME_BACKGROUND_ENABLED = "home_background_enabled"
     private const val DEFAULT_OPEN_TAB = "default_open_tab"
     private const val QUICK_PICKS_DISPLAY = "quick_picks_display"
@@ -216,6 +222,7 @@ object FoxySettings {
             playerBackgroundStyle = prefs.getInt(PLAYER_BACKGROUND_STYLE, 0).coerceIn(0, 3),
             playerStyle = prefs.getInt(PLAYER_STYLE, 0).coerceIn(0, 2),
             playerButtonsStyle = prefs.getInt(PLAYER_BUTTONS_STYLE, 0).coerceIn(0, 2),
+            enableLiquidGlassLayout = prefs.getBoolean(ENABLE_LIQUID_GLASS_LAYOUT, false),
             miniPlayerStyle = prefs.getInt(MINI_PLAYER_STYLE, 0).coerceIn(0, 2),
             bottomNavigationStyle = prefs.getInt(BOTTOM_NAV_STYLE, 0).coerceIn(0, 2),
             playerArtworkShape = prefs.getInt(PLAYER_ARTWORK_SHAPE, 0).coerceIn(0, 2),
@@ -243,6 +250,7 @@ object FoxySettings {
             artworkPriority = prefs.getInt(ARTWORK_PRIORITY, 0).coerceIn(0, 3),
             recognitionSource = prefs.getInt(RECOGNITION_SOURCE, 0).coerceIn(0, 1),
             recognitionHistoryLimit = prefs.getInt(RECOGNITION_HISTORY_LIMIT, 40).coerceIn(10, 100),
+            experimentalHomeHeaderAccent = prefs.getBoolean(EXPERIMENTAL_HOME_HEADER_ACCENT, false),
             homeBackgroundEnabled = prefs.getBoolean(HOME_BACKGROUND_ENABLED, false),
             defaultOpenTab = prefs.getInt(DEFAULT_OPEN_TAB, 0).let { if (it == 1 || it == 3) it else 0 },
             quickPicksDisplayMode = prefs.getInt(QUICK_PICKS_DISPLAY, 0).coerceIn(0, 1),
@@ -294,6 +302,7 @@ object FoxySettings {
             ?.putInt(PLAYER_BACKGROUND_STYLE, next.playerBackgroundStyle.coerceIn(0, 3))
             ?.putInt(PLAYER_STYLE, next.playerStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_BUTTONS_STYLE, next.playerButtonsStyle.coerceIn(0, 2))
+            ?.putBoolean(ENABLE_LIQUID_GLASS_LAYOUT, next.enableLiquidGlassLayout)
             ?.putInt(MINI_PLAYER_STYLE, next.miniPlayerStyle.coerceIn(0, 2))
             ?.putInt(BOTTOM_NAV_STYLE, next.bottomNavigationStyle.coerceIn(0, 2))
             ?.putInt(PLAYER_ARTWORK_SHAPE, next.playerArtworkShape.coerceIn(0, 2))
@@ -316,6 +325,7 @@ object FoxySettings {
             ?.putInt(ARTWORK_PRIORITY, next.artworkPriority.coerceIn(0, 3))
             ?.putInt(RECOGNITION_SOURCE, next.recognitionSource.coerceIn(0, 1))
             ?.putInt(RECOGNITION_HISTORY_LIMIT, next.recognitionHistoryLimit.coerceIn(10, 100))
+            ?.putBoolean(EXPERIMENTAL_HOME_HEADER_ACCENT, next.experimentalHomeHeaderAccent)
             ?.putBoolean(HOME_BACKGROUND_ENABLED, next.homeBackgroundEnabled)
             ?.putInt(DEFAULT_OPEN_TAB, if (next.defaultOpenTab == 1 || next.defaultOpenTab == 3) next.defaultOpenTab else 0)
             ?.putInt(QUICK_PICKS_DISPLAY, next.quickPicksDisplayMode.coerceIn(0, 1))

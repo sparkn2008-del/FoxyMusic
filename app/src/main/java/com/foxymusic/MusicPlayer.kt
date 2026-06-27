@@ -123,6 +123,8 @@ object MusicPlayer {
     private var crossfadeAdvanceJob: Job? = null
     @Volatile
     private var manualVolumeRamp = false
+    @Volatile
+    private var lastHeavyProgressWorkAtMs = 0L
     private var exoPlayer: ExoPlayer? = null
     private val streamResolveInFlight = ConcurrentHashMap.newKeySet<String>()
     private var trackEntryMs = 0L
@@ -233,13 +235,17 @@ object MusicPlayer {
                 )
             }
 
-            maybeScheduleEarlyPreload(dur, pos)
-            if (!offlineQueueOnly) scheduleRadioExtendIfNeeded()
+            val nowMs = SystemClock.elapsedRealtime()
+            if (nowMs - lastHeavyProgressWorkAtMs >= 1_000L) {
+                lastHeavyProgressWorkAtMs = nowMs
+                maybeScheduleEarlyPreload(dur, pos)
+                if (!offlineQueueOnly) scheduleRadioExtendIfNeeded()
+            }
             applyVolumeCrossfade()
             maybeTriggerCrossfadeAdvance(dur, pos)
             maybeSkipSponsor(pos)
 
-            delay(180)
+            delay(300)
         }
     }
 }
@@ -724,7 +730,11 @@ object MusicPlayer {
         }
 
         val tier = effectiveStreamQualityTier()
-        StreamExtractor.peekCachedStreamResult(song.videoId, tier, song.streamSearchQuery())?.url?.let { url ->
+        StreamExtractor.peekCachedStreamResult(
+            song.videoId,
+            tier,
+            song.bestQualitySearchQuery(),
+        )?.url?.let { url ->
             if (requestId != activePlayRequestId) return
             playResolved(context, url, song)
             if (!offlineQueueOnly) scope.launch { maybeExtendQueueForAutoplay() }
@@ -941,7 +951,11 @@ object MusicPlayer {
         FoxyOfflineBundle.resolvePlayableUrl(context, offlineBase)?.let { return it }
         preloadedStream?.takeIf { it.first == song.videoId }?.second?.let { return it }
         val tier = effectiveStreamQualityTier()
-        StreamExtractor.peekCachedStreamResult(song.videoId, tier, song.streamSearchQuery())?.url?.let { return it }
+        StreamExtractor.peekCachedStreamResult(
+            song.videoId,
+            tier,
+            song.bestQualitySearchQuery(),
+        )?.url?.let { return it }
         return resolveFreshStreamResult(song, tier).url
     }
 
@@ -951,7 +965,13 @@ object MusicPlayer {
             val attempts = (preferred downTo 0).toList()
             var last = StreamResult(null, "Could not fetch stream URL")
             for (attemptTier in attempts) {
-                val result = StreamExtractor.getStreamResult(song.videoId, attemptTier, song.streamSearchQuery())
+                val result = StreamExtractor.getStreamResult(
+                    song.videoId,
+                    attemptTier,
+                    song.bestQualitySearchQuery(),
+                    song.title,
+                    song.artist,
+                )
                 if (!result.url.isNullOrBlank()) return@withContext result
                 last = result
             }
@@ -1800,14 +1820,6 @@ object MusicPlayer {
         runCatching { ctx.stopService(Intent(ctx, FoxyMediaSessionService::class.java)) }
     }
 }
-
-private fun Song.streamSearchQuery(): String =
-    listOf(title, artist)
-        .map { it.trim() }
-        .filter { it.isNotBlank() && it != videoId }
-        .distinct()
-        .joinToString(" ")
-        .ifBlank { videoId }
 
 private fun buildStreamHeaders(): Map<String, String> = buildFoxyStreamHeaders()
 

@@ -12,7 +12,8 @@ data class FoxyAccountState(
     val cookie: String = "",
     val name: String = "",
     val email: String = "",
-    val avatarUrl: String = ""
+    val avatarUrl: String = "",
+    val pageId: String = "",
 ) {
     val isSignedIn: Boolean
         get() = cookie.parseCookies().containsKey("SAPISID")
@@ -27,6 +28,7 @@ object FoxyAccount {
     private const val KEY_NAME = "name"
     private const val KEY_EMAIL = "email"
     private const val KEY_AVATAR = "avatar"
+    private const val KEY_PAGE_ID = "page_id"
 
     private var prefs: SharedPreferences? = null
     private val _state = MutableStateFlow(FoxyAccountState())
@@ -38,34 +40,49 @@ object FoxyAccount {
             cookie = prefs?.getString(KEY_COOKIE, "").orEmpty(),
             name = prefs?.getString(KEY_NAME, "").orEmpty(),
             email = prefs?.getString(KEY_EMAIL, "").orEmpty(),
-            avatarUrl = prefs?.getString(KEY_AVATAR, "").orEmpty()
+            avatarUrl = prefs?.getString(KEY_AVATAR, "").orEmpty(),
+            pageId = prefs?.getString(KEY_PAGE_ID, "").orEmpty(),
         )
     }
 
-    fun updateSession(cookie: String, name: String = "", email: String = "", avatarUrl: String = "") {
+    fun updateSession(
+        cookie: String,
+        name: String = "",
+        email: String = "",
+        avatarUrl: String = "",
+        pageId: String = "",
+    ) {
         val merged = FoxyAccountState(
             cookie = cookie,
             name = name.ifBlank { _state.value.name },
             email = email.ifBlank { _state.value.email },
-            avatarUrl = avatarUrl.ifBlank { _state.value.avatarUrl }
+            avatarUrl = avatarUrl.ifBlank { _state.value.avatarUrl },
+            pageId = pageId.ifBlank { _state.value.pageId },
         )
         prefs?.edit()
             ?.putString(KEY_COOKIE, merged.cookie)
             ?.putString(KEY_NAME, merged.name)
             ?.putString(KEY_EMAIL, merged.email)
             ?.putString(KEY_AVATAR, merged.avatarUrl)
+            ?.putString(KEY_PAGE_ID, merged.pageId)
             ?.apply()
         StreamUrlCache.clear()
         _state.value = merged
     }
 
-    fun updateProfile(name: String, email: String, avatarUrl: String) {
+    fun updateProfile(name: String, email: String, avatarUrl: String, pageId: String = "") {
         _state.update { current ->
-            val updated = current.copy(name = name, email = email, avatarUrl = avatarUrl)
+            val updated = current.copy(
+                name = name.ifBlank { current.name },
+                email = email.ifBlank { current.email },
+                avatarUrl = avatarUrl.ifBlank { current.avatarUrl },
+                pageId = pageId.ifBlank { current.pageId },
+            )
             prefs?.edit()
                 ?.putString(KEY_NAME, updated.name)
                 ?.putString(KEY_EMAIL, updated.email)
                 ?.putString(KEY_AVATAR, updated.avatarUrl)
+                ?.putString(KEY_PAGE_ID, updated.pageId)
                 ?.apply()
             updated
         }

@@ -71,6 +71,7 @@ object FoxyFlutterChannels {
         const val GET_APP_VERSION = "getAppVersion"
         const val OPEN_SYSTEM_EQUALIZER = "openSystemEqualizer"
         const val OPEN_WEB_LOGIN = "openWebLogin"
+        const val ACCOUNT_SET_COOKIE = "accountSetCookie"
         const val ACCOUNT_SIGN_OUT = "accountSignOut"
         const val OPEN_EXTERNAL_URL = "openExternalUrl"
         const val GET_VIDEO_CLIP_STREAM = "getVideoClipStream"
@@ -89,6 +90,9 @@ object FoxyFlutterChannels {
         const val GET_PLAYER_STATE = "getPlayerState"
         const val PICK_HOME_BACKGROUND = "pickHomeBackground"
         const val CLEAR_HOME_BACKGROUND = "clearHomeBackground"
+        const val GET_REMOTE_CONFIG_CACHE = "getRemoteConfigCache"
+        const val SET_REMOTE_CONFIG_CACHE = "setRemoteConfigCache"
+        const val CLEAR_REMOTE_CONFIG_CACHE = "clearRemoteConfigCache"
         /** Relaunch the app so Flutter reloads home wallpaper and theme state. */
         const val RESTART_APP = "restartApp"
     }
@@ -104,6 +108,7 @@ object FoxyFlutterChannels {
      */
     object Events {
         const val PLAYER_STATE = "playerState"
+        const val PLAYER_PROGRESS = "playerProgress"
         /** Emitted after [Methods.SET_APPEARANCE] so Flutter can reload [Methods.GET_APPEARANCE]. */
         const val APPEARANCE_CHANGED = "appearanceChanged"
         const val SLEEP_TIMER = "sleepTimerState"

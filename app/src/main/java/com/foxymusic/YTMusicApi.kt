@@ -1,6 +1,8 @@
 package com.foxymusic
 
 import android.util.Log
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
@@ -137,9 +139,9 @@ object YTMusicApi {
         search(query, filterVideos)
 
     /** Foxy-style categorized search (songs / videos / albums / artists). */
-    suspend fun searchAll(query: String, limitPerCategory: Int = 28): Map<String, List<Song>> {
+    suspend fun searchAll(query: String, limitPerCategory: Int = 28): Map<String, List<Song>> = coroutineScope {
         if (query.isBlank()) {
-            return mapOf(
+            return@coroutineScope mapOf(
                 "songs" to emptyList(),
                 "videos" to emptyList(),
                 "albums" to emptyList(),
@@ -147,11 +149,28 @@ object YTMusicApi {
             )
         }
         val cap = limitPerCategory.coerceIn(8, 40)
-        return mapOf(
-            "songs" to search(query, filterSongs).take(cap),
-            "videos" to search(query, filterVideos).take(cap),
-            "albums" to search(query, filterAlbums).take(cap),
-            "artists" to search(query, filterArtists).take(cap),
+
+        suspend fun safeSearch(filter: String?): List<Song> =
+            runCatching { search(query, filter).take(cap) }.getOrDefault(emptyList())
+
+        val broadJob = async { safeSearch(null) }
+        val songsJob = async { safeSearch(filterSongs) }
+        val videosJob = async { safeSearch(filterVideos) }
+        val albumsJob = async { safeSearch(filterAlbums) }
+        val artistsJob = async { safeSearch(filterArtists) }
+
+        val broad = broadJob.await().distinctBy { it.videoId }.take(cap)
+        val songs = songsJob.await().ifEmpty { broad }.distinctBy { it.videoId }.take(cap)
+        val videos = videosJob.await()
+            .ifEmpty { broad.filterNot { fallback -> songs.any { it.videoId == fallback.videoId } } }
+            .distinctBy { it.videoId }
+            .take(cap)
+
+        return@coroutineScope mapOf(
+            "songs" to songs,
+            "videos" to videos,
+            "albums" to albumsJob.await().distinctBy { it.videoId }.take(cap),
+            "artists" to artistsJob.await().distinctBy { it.videoId }.take(cap),
         )
     }
 

@@ -207,6 +207,35 @@ object StreamExtractor {
     fun getStreamResult(videoId: String): StreamResult =
         getStreamResult(videoId, FoxySettings.state.value.streamQualityTier)
 
+    fun searchSoundCloud(query: String, limit: Int = 12): List<Song> {
+        val q = query.trim()
+        if (q.isBlank()) return emptyList()
+        return try {
+            ensureNewPipe()
+            val service = ServiceList.SoundCloud
+            val searchInfo = SearchInfo.getInfo(service, service.searchQHFactory.fromQuery(q))
+            searchInfo.relatedItems
+                .filterIsInstance<StreamInfoItem>()
+                .filter { it.url.isNotBlank() && it.name.isNotBlank() }
+                .distinctBy { it.url }
+                .take(limit.coerceIn(1, 24))
+                .map { item ->
+                    Song(
+                        videoId = item.url,
+                        title = item.name,
+                        artist = item.uploaderName.ifBlank { "SoundCloud" },
+                        thumbnail = item.thumbnailUrl.orEmpty(),
+                        artworkUrl = item.thumbnailUrl.orEmpty(),
+                        duration = item.duration.takeIf { it > 0 }?.let(::formatDurationSeconds),
+                        album = "SoundCloud",
+                    )
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "SoundCloud search failed: ${e.message}", e)
+            emptyList()
+        }
+    }
+
     fun getVideoClipResult(
         videoId: String,
         title: String? = null,
@@ -214,12 +243,20 @@ object StreamExtractor {
     ): StreamResult =
         getVideoClipResult(videoId, 720, title, artist)
 
-    fun getStreamResult(videoId: String, qualityTier: Int, searchQuery: String? = null): StreamResult {
+    fun getStreamResult(
+        videoId: String,
+        qualityTier: Int,
+        searchQuery: String? = null,
+        title: String? = null,
+        artist: String? = null,
+    ): StreamResult {
         val tier = qualityTier.coerceIn(0, 4)
-        val sourcePriority = FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
+        val ultraMode = tier >= 4
+        val sourcePriority = if (ultraMode) 1 else FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
         val maxBitrate = maxBitrateForTier(tier)
         val extractorErrors = mutableListOf<String>()
         var lastError: String? = null
+        var bestUltraCandidate: StreamResult? = null
 
         peekCachedStreamResult(videoId, tier, searchQuery)?.let { cached ->
             return cached.copy(source = cached.source ?: "cache")
@@ -230,15 +267,19 @@ object StreamExtractor {
             when (val result = getSoundCloudStreamResult(soundCloudRef, maxBitrate, isUrl = true)) {
                 is ExtractorAttempt.Success -> {
                     val stream = result.toStreamResult()
-                    StreamUrlCache.put(videoId, tier, stream)
-                    return stream
+                    if (ultraMode) {
+                        bestUltraCandidate = chooseBetterUltra(bestUltraCandidate, stream)
+                    } else {
+                        StreamUrlCache.put(videoId, tier, stream)
+                        return stream
+                    }
                 }
                 is ExtractorAttempt.Failure -> extractorErrors += "SoundCloud: ${result.message}"
             }
         }
 
-        if (tier >= 3 && sourcePriority == 2 && !searchQuery.isNullOrBlank()) {
-            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+        if (!ultraMode && tier >= 3 && sourcePriority == 2 && !searchQuery.isNullOrBlank()) {
+            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false, title, artist)) {
                 is ExtractorAttempt.Success -> {
                     val stream = result.toStreamResult()
                     StreamUrlCache.put(videoId, tier, stream)
@@ -263,17 +304,34 @@ object StreamExtractor {
                         val attempt = future.get(10, TimeUnit.SECONDS)
                         if (attempt?.url != null) {
                             futures.forEach { it.cancel(true) }
-                            return cacheAndReturn(
-                                videoId,
-                                tier,
+                            val resolved = if (ultraMode) {
+                                chooseBetterUltra(
+                                    bestUltraCandidate,
+                                    maybeUpgradeUltraWithAlternateSource(
+                                        videoId,
+                                        tier,
+                                        attempt,
+                                        searchQuery,
+                                        title,
+                                        artist,
+                                        maxBitrate,
+                                    ),
+                                ) ?: attempt
+                            } else {
                                 maybeUpgradeUltraWithAlternateSource(
                                     videoId,
                                     tier,
                                     attempt,
                                     searchQuery,
-                                    sourcePriority,
+                                    title,
+                                    artist,
                                     maxBitrate,
-                                ),
+                                )
+                            }
+                            return cacheAndReturn(
+                                videoId,
+                                tier,
+                                resolved,
                             )
                         }
                         attempt?.error?.let {
@@ -292,17 +350,34 @@ object StreamExtractor {
         for (ytClient in clientOrder.drop(parallelCount)) {
             val attempt = tryInnertubeClient(videoId, ytClient, maxBitrate, tier)
             if (attempt.url != null) {
-                return cacheAndReturn(
-                    videoId,
-                    tier,
+                val resolved = if (ultraMode) {
+                    chooseBetterUltra(
+                        bestUltraCandidate,
+                        maybeUpgradeUltraWithAlternateSource(
+                            videoId,
+                            tier,
+                            attempt,
+                            searchQuery,
+                            title,
+                            artist,
+                            maxBitrate,
+                        ),
+                    ) ?: attempt
+                } else {
                     maybeUpgradeUltraWithAlternateSource(
                         videoId,
                         tier,
                         attempt,
                         searchQuery,
-                        sourcePriority,
+                        title,
+                        artist,
                         maxBitrate,
-                    ),
+                    )
+                }
+                return cacheAndReturn(
+                    videoId,
+                    tier,
+                    resolved,
                 )
             }
             attempt.error?.let {
@@ -315,14 +390,30 @@ object StreamExtractor {
         when (val newPipeResult = getNewPipeStreamResult(videoId, maxBitrate)) {
             is ExtractorAttempt.Success -> {
                 val result = newPipeResult.toStreamResult()
-                val best = maybeUpgradeUltraWithAlternateSource(
-                    videoId,
-                    tier,
-                    result,
-                    searchQuery,
-                    sourcePriority,
-                    maxBitrate,
-                )
+                val best = if (ultraMode) {
+                    chooseBetterUltra(
+                        bestUltraCandidate,
+                        maybeUpgradeUltraWithAlternateSource(
+                            videoId,
+                            tier,
+                            result,
+                            searchQuery,
+                            title,
+                            artist,
+                            maxBitrate,
+                        ),
+                    ) ?: result
+                } else {
+                    maybeUpgradeUltraWithAlternateSource(
+                        videoId,
+                        tier,
+                        result,
+                        searchQuery,
+                        title,
+                        artist,
+                        maxBitrate,
+                    )
+                }
                 StreamUrlCache.put(videoId, tier, best)
                 return best
             }
@@ -332,8 +423,8 @@ object StreamExtractor {
             }
         }
 
-        if (tier >= 3 && sourcePriority == 1 && !searchQuery.isNullOrBlank()) {
-            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+        if (!ultraMode && tier >= 3 && sourcePriority == 1 && !searchQuery.isNullOrBlank()) {
+            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false, title, artist)) {
                 is ExtractorAttempt.Success -> {
                     val stream = result.toStreamResult()
                     StreamUrlCache.put(videoId, tier, stream)
@@ -344,6 +435,20 @@ object StreamExtractor {
                     Log.w(TAG, "SoundCloud fallback failed: ${result.message}", result.throwable)
                 }
             }
+        }
+        if (ultraMode && !searchQuery.isNullOrBlank()) {
+            when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false, title, artist)) {
+                is ExtractorAttempt.Success -> {
+                    bestUltraCandidate = chooseBetterUltra(
+                        bestUltraCandidate,
+                        result.toStreamResult(),
+                    )
+                }
+                is ExtractorAttempt.Failure -> {
+                    extractorErrors += "SoundCloud: ${result.message}"
+                }
+            }
+            bestUltraCandidate?.url?.let { return cacheAndReturn(videoId, tier, bestUltraCandidate!!) }
         }
         return StreamResult(null, extractorErrors.joinToString("\n").ifBlank { "Could not fetch stream URL" })
     }
@@ -402,8 +507,9 @@ object StreamExtractor {
 
     fun peekCachedStreamResult(videoId: String, qualityTier: Int, searchQuery: String? = null): StreamResult? {
         val tier = qualityTier.coerceIn(0, 4)
-        val sourcePriority = FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
         val cached = StreamUrlCache.peekResult(videoId, tier) ?: return null
+        if (tier >= 4) return cached
+        val sourcePriority = FoxySettings.state.value.streamSourcePriority.coerceIn(0, 2)
         val wantsSoundCloudFirst = tier >= 3 &&
             sourcePriority == 2 &&
             !searchQuery.isNullOrBlank() &&
@@ -423,22 +529,41 @@ object StreamExtractor {
         tier: Int,
         current: StreamResult,
         searchQuery: String?,
-        sourcePriority: Int,
+        title: String?,
+        artist: String?,
         maxBitrate: Int?,
     ): StreamResult {
-        if (tier < 3 || searchQuery.isNullOrBlank()) return current
+        if (tier < 4 || searchQuery.isNullOrBlank()) return current
         if (current.isLosslessLike()) return current
-        val alternate = when (val result = getSoundCloudStreamResult(searchQuery, maxBitrate, isUrl = false)) {
+        val alternate = when (
+            val result = getSoundCloudStreamResult(
+                searchQuery,
+                maxBitrate,
+                isUrl = false,
+                title = title,
+                artist = artist,
+            )
+        ) {
             is ExtractorAttempt.Success -> result.toStreamResult()
             is ExtractorAttempt.Failure -> {
                 return current
             }
         }
-        val alternateWins = alternate.ultraQualityScore() > current.ultraQualityScore()
-        if (sourcePriority == 0 && !alternate.isLosslessLike() && !alternateWins) {
-            return current
+        return chooseBetterUltra(current, alternate) ?: current
+    }
+
+    private fun chooseBetterUltra(
+        first: StreamResult?,
+        second: StreamResult?,
+    ): StreamResult? {
+        val a = first?.takeIf { it.url != null }
+        val b = second?.takeIf { it.url != null }
+        return when {
+            a == null -> b
+            b == null -> a
+            b.ultraQualityScore() > a.ultraQualityScore() -> b
+            else -> a
         }
-        return if (alternateWins) alternate else current
     }
 
     private fun tryInnertubeClient(
@@ -857,6 +982,8 @@ object StreamExtractor {
         queryOrUrl: String,
         maxBitrate: Int?,
         isUrl: Boolean,
+        title: String? = null,
+        artist: String? = null,
     ): ExtractorAttempt {
         return try {
             ensureNewPipe()
@@ -867,10 +994,11 @@ object StreamExtractor {
                 val searchInfo = SearchInfo.getInfo(service, service.searchQHFactory.fromQuery(queryOrUrl))
                 val candidate = searchInfo.relatedItems
                     .filterIsInstance<StreamInfoItem>()
-                    .maxByOrNull { soundCloudMatchScore(queryOrUrl, it) }
+                    .maxByOrNull { soundCloudMatchScore(queryOrUrl, title, artist, it) }
                     ?: return ExtractorAttempt.Failure("No SoundCloud result for $queryOrUrl")
-                val score = soundCloudMatchScore(queryOrUrl, candidate)
-                if (score < 0.28) {
+                val score = soundCloudMatchScore(queryOrUrl, title, artist, candidate)
+                val threshold = if (!title.isNullOrBlank() || !artist.isNullOrBlank()) 0.52 else 0.32
+                if (score < threshold) {
                     return ExtractorAttempt.Failure("No close SoundCloud match for $queryOrUrl")
                 }
                 candidate.url
@@ -948,20 +1076,47 @@ object StreamExtractor {
         return null
     }
 
-    private fun soundCloudMatchScore(query: String, item: StreamInfoItem): Double {
-        val target = "${item.name} ${item.uploaderName}".normalizedSearchTokens()
-        val source = query.normalizedSearchTokens()
-        if (source.isEmpty() || target.isEmpty()) return 0.0
-        val hits = source.count { it in target }
-        val coverage = hits.toDouble() / source.size.toDouble()
-        val titleBonus = if (item.name.normalizedSearchText() in query.normalizedSearchText() ||
-            query.normalizedSearchText() in item.name.normalizedSearchText()
+    private fun soundCloudMatchScore(
+        query: String,
+        title: String?,
+        artist: String?,
+        item: StreamInfoItem,
+    ): Double {
+        val queryTitle = title.orEmpty().streamCoreTitle().normalizedSearchText()
+        val queryArtist = artist.orEmpty().streamCoreArtist().normalizedSearchText()
+        val queryTokens = query.normalizedSearchTokens()
+        val candidateTitle = item.name.orEmpty().normalizedSearchText()
+        val candidateArtist = item.uploaderName.orEmpty().normalizedSearchText()
+        val candidateTokens = "$candidateTitle $candidateArtist".normalizedSearchTokens()
+        if (candidateTokens.isEmpty()) return 0.0
+
+        val titleTokens = queryTitle.normalizedSearchTokens()
+        val artistTokens = queryArtist.normalizedSearchTokens()
+        val titleCoverage = coverageScore(titleTokens, candidateTokens)
+        val artistCoverage = coverageScore(artistTokens, candidateTokens)
+        val queryCoverage = coverageScore(queryTokens, candidateTokens)
+
+        var score = queryCoverage * 0.35 + titleCoverage * 0.45 + artistCoverage * 0.30
+
+        if (queryTitle.isNotBlank() &&
+            (candidateTitle.contains(queryTitle) || queryTitle.contains(candidateTitle))
         ) {
-            0.18
-        } else {
-            0.0
+            score += 0.18
         }
-        return coverage + titleBonus
+        if (queryArtist.isNotBlank() &&
+            (candidateArtist.contains(queryArtist) || queryArtist.contains(candidateArtist))
+        ) {
+            score += 0.16
+        }
+        if (artistTokens.isNotEmpty() && artistCoverage <= 0.01) {
+            score *= 0.34
+        }
+        if (titleTokens.isNotEmpty() && titleCoverage <= 0.08) {
+            score *= 0.40
+        }
+
+        score -= streamCandidatePenalty("${item.name} ${item.uploaderName}")
+        return score
     }
 
     private fun clipCandidateSongs(title: String?, artist: String?): List<Song> {
@@ -1079,6 +1234,43 @@ object StreamExtractor {
         }
     }
 
+    private fun streamCandidatePenalty(text: String): Double {
+        val lowered = text.lowercase()
+        val badTerms = listOf(
+            "lyrics",
+            "lyric",
+            "cover",
+            "live",
+            "instrumental",
+            "slowed",
+            "speed up",
+            "sped up",
+            "nightcore",
+            "remix",
+            "edit",
+            "reverb",
+            "8d",
+            "karaoke",
+            "reaction",
+            "tutorial",
+            "mashup",
+            "fanmade",
+        )
+        val hits = badTerms.count { lowered.contains(it) }
+        return when {
+            hits <= 0 -> 0.0
+            hits == 1 -> 0.22
+            hits == 2 -> 0.42
+            else -> 0.68
+        }
+    }
+
+    private fun coverageScore(source: Set<String>, target: Set<String>): Double {
+        if (source.isEmpty() || target.isEmpty()) return 0.0
+        val hits = source.count { it in target }
+        return hits.toDouble() / source.size.toDouble()
+    }
+
     private fun ExtractorAttempt.Success.toStreamResult(): StreamResult =
         StreamResult(
             url,
@@ -1097,7 +1289,15 @@ object StreamExtractor {
         val codecPart = losslessCodecScore(codec ?: mimeType ?: qualityLabel)
             .takeIf { it > 0 }
             ?: lossyCodecScore(codec ?: mimeType ?: qualityLabel)
-        return codecPart * 1_000_000 + (bitrate ?: 0)
+        val br = bitrate ?: 0
+        val floorBonus = when {
+            codecPart >= 90 -> 300_000_000
+            br >= 320_000 -> 150_000_000
+            br >= 240_000 -> 110_000_000
+            br >= 192_000 -> 50_000_000
+            else -> 0
+        }
+        return floorBonus + codecPart * 1_000_000 + br
     }
 
     private fun newPipeCodecScore(name: String?): Int =
@@ -1149,6 +1349,14 @@ object StreamExtractor {
         }
     }
 
+    private fun formatDurationSeconds(seconds: Long): String {
+        val s = seconds.coerceAtLeast(0)
+        val h = s / 3600
+        val m = (s % 3600) / 60
+        val sec = s % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
+    }
+
     private fun Request.Builder.addFoxyAccountHeaders(origin: String): Request.Builder {
         val account = FoxyAccount.state.value
         if (account.cookie.isBlank()) return this
@@ -1174,6 +1382,27 @@ private fun String.normalizedSearchText(): String =
     lowercase()
         .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
         .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+
+private fun String.streamCoreTitle(): String =
+    trim()
+        .replace(
+            Regex("""(?i)\b(official|lyrics?|lyrical|video|audio|visualizer|mv|hq|4k|8d)\b"""),
+            " ",
+        )
+        .replace(
+            Regex("""(?i)\b(slowed|reverb|sped up|speed up|nightcore|remix|edit|cover|live)\b"""),
+            " ",
+        )
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
+private fun String.streamCoreArtist(): String =
+    trim()
+        .replace(Regex("""(?i)\b(ft|feat|featuring|x|&)\b"""), " ")
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""\s+"""), " ")
         .trim()
 
 private fun String.normalizedSearchTokens(): Set<String> =

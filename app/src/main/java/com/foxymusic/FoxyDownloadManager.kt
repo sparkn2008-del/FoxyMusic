@@ -52,11 +52,9 @@ object FoxyDownloadManager {
                     StreamExtractor.getStreamResult(
                         song.videoId,
                         tier,
-                        listOf(song.title, song.artist)
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() && it != song.videoId }
-                            .distinct()
-                            .joinToString(" ")
+                        song.bestQualitySearchQuery(),
+                        song.title,
+                        song.artist,
                     )
                 }
                 val url = result.url

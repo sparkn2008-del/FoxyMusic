@@ -114,3 +114,41 @@ data class Song(
         }
     }
 }
+
+fun Song.bestQualitySearchQuery(): String {
+    val cleanTitle = title.searchCoreTitle()
+    val cleanArtist = artist.searchCoreArtist()
+    val cleanAlbum = album.orEmpty().searchCoreAlbum()
+    val parts = linkedSetOf<String>()
+    if (cleanTitle.isNotBlank() && cleanArtist.isNotBlank()) {
+        parts += "$cleanTitle $cleanArtist"
+        parts += "$cleanArtist $cleanTitle"
+    }
+    if (cleanTitle.isNotBlank()) parts += cleanTitle
+    if (cleanArtist.isNotBlank()) parts += cleanArtist
+    if (cleanAlbum.isNotBlank() && cleanTitle.isNotBlank()) {
+        parts += "$cleanTitle $cleanAlbum"
+    }
+    return parts.firstOrNull { it.isNotBlank() } ?: videoId
+}
+
+private fun String.searchCoreTitle(): String =
+    trim()
+        .replace(Regex("""(?i)\b(official|lyrics?|lyrical|video|audio|visualizer|mv|hq|4k|8d)\b"""), " ")
+        .replace(Regex("""(?i)\b(slowed|reverb|sped up|speed up|nightcore|remix|edit|cover|live)\b"""), " ")
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
+private fun String.searchCoreArtist(): String =
+    trim()
+        .replace(Regex("""(?i)\b(ft|feat|featuring|x|&)\b"""), " ")
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
+private fun String.searchCoreAlbum(): String =
+    trim()
+        .replace(Regex("""\([^)]*\)|\[[^]]*]"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()

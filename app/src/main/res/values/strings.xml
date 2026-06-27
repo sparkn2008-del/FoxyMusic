@@ -1,21 +1,29 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FoxyMusic</string>
     <string name="downloads_channel_name">Downloads</string>
     <string name="downloads_channel_description">Offline downloads</string>
     <string name="playback_channel_name">Now playing</string>
     <string name="playback_channel_description">Playback controls and current track</string>
-    <string name="playback_foreground_placeholder">Preparing playback…</string>
-    <string name="playback_buffering">Buffering…</string>
+    <string name="playback_foreground_placeholder">Preparing playbackâ€¦</string>
+    <string name="playback_buffering">Bufferingâ€¦</string>
     <string name="playback_notification_app">FoxyMusic</string>
-    <string name="download_progress_indeterminate">Downloading…</string>
+    <string name="download_progress_indeterminate">Downloadingâ€¦</string>
     <string name="download_progress_percent">%1$d%% complete</string>
     <string name="direct_download_channel_name">Song downloads</string>
     <string name="direct_download_channel_description">Progress for offline file downloads</string>
-    <string name="direct_download_title">Downloading · %1$s</string>
+    <string name="direct_download_title">Downloading Â· %1$s</string>
     <string name="ytm_login_toolbar_title">Connect YouTube Music</string>
-    <string name="ytm_login_status_waiting">Sign in on this page. When finished, tap Save session.</string>
-    <string name="ytm_login_status_ready">Signed in — you can save the session for FoxyMusic.</string>
+    <string name="ytm_login_status_waiting">Sign in on this page. FoxyMusic will save the session automatically when YouTube Music opens.</string>
+    <string name="ytm_login_status_ready">Signed in - saving your YouTube Music session.</string>
+    <string name="ytm_login_status_saving">Saving session and reading account profile...</string>
+    <string name="ytm_login_status_saving_manual">Saving pasted session and reading account profile...</string>
+    <string name="ytm_login_status_saved">Login successful.</string>
+    <string name="ytm_login_manual_cookie">Manual cookie</string>
+    <string name="ytm_login_manual_cookie_hint">Paste the full YouTube Music cookie from a logged-in browser session. It must contain SAPISID.</string>
+    <string name="ytm_login_invalid_cookie">Cookie must contain SAPISID</string>
     <string name="ytm_login_save">Save session</string>
 </resources>
+
+
 

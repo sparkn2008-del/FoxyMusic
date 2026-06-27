@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "enabled": true,
+  "home": {
+    "signedInHeroMode": "quickPicks",
+    "sectionOrder": ["quickPicks", "newReleases", "artists", "categories"],
+    "maxGridItems": 6,
+    "cardScale": 1.0,
+    "gradientStrength": 0.95
+  },
+  "features": {
+    "soundCloudSearch": true,
+    "videoBackground": true
+  },
+  "media": {
+    "thumbnailSize": 480
+  },
+  "search": {
+    "timeoutMs": 2600
+  }
+}

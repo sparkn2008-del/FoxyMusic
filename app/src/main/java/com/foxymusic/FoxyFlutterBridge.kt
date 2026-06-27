@@ -31,6 +31,7 @@ import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Calendar
 import java.util.Collections
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -49,7 +50,13 @@ class FoxyFlutterBridge(
     @Volatile
     private var lastFullEmitKey: String = ""
     @Volatile
+    private var lastQueueEmitKey: String = ""
+    @Volatile
     private var lastLightEmitAtMs: Long = 0L
+    @Volatile
+    private var lastProgressEmitAtMs: Long = 0L
+    @Volatile
+    private var lastProgressKey: String = ""
 
     private fun searchHistoryPrefs(): FoxySearchHistoryPrefs =
         FoxySearchHistoryPrefs(context)
@@ -140,6 +147,7 @@ class FoxyFlutterBridge(
             "playerBackgroundStyle" to settings.playerBackgroundStyle,
             "playerStyle" to settings.playerStyle,
             "playerButtonsStyle" to settings.playerButtonsStyle,
+            "enableLiquidGlassLayout" to settings.enableLiquidGlassLayout,
             "playerArtworkShape" to settings.playerArtworkShape,
             "hidePlayerArtwork" to settings.hidePlayerArtwork,
             "cropArtworkSquare" to settings.cropArtworkSquare,
@@ -171,28 +179,44 @@ class FoxyFlutterBridge(
     ) {
         if (sinks.isEmpty()) return
 
-        val forceFull = (ui.isBuffering && !ui.isPlaying) || !ui.isPlaying
         emit(
             mapOf(
                 "type" to FoxyFlutterChannels.Events.PLAYER_STATE,
-                "state" to flutterPlayerStateMap(ui, includeQueue || forceFull)
+                "state" to flutterPlayerStateMap(ui, includeQueue)
             )
+        )
+    }
+
+    private fun emitPlayerProgressEvent(ui: PlayerUiState = FoxyPlayerConnection.state.value) {
+        if (sinks.isEmpty()) return
+        val nativePlaying = MusicPlayer.isPlaying()
+        val livePosition = MusicPlayer.currentPosition()
+        val liveDuration = MusicPlayer.duration()
+        val positionMs = if (nativePlaying || livePosition > 0L) {
+            maxOf(ui.positionMs, livePosition)
+        } else {
+            ui.positionMs
+        }
+        val durationMs = when {
+            liveDuration > 0L -> liveDuration
+            ui.durationMs > 0L -> ui.durationMs
+            else -> 0L
+        }
+        emit(
+            mapOf(
+                "type" to FoxyFlutterChannels.Events.PLAYER_PROGRESS,
+                "positionMs" to positionMs,
+                "durationMs" to durationMs,
+                "bufferedFraction" to ui.bufferedFraction,
+                "isPlaying" to (ui.isPlaying || nativePlaying),
+                "isBuffering" to (ui.isBuffering && !(ui.isPlaying || nativePlaying)),
+            ),
         )
     }
 
     /** Aggressive live updates (especially during buffering) */
     private fun scheduleFlutterPlayerStatePush(includeQueue: Boolean = false) {
         emitLivePlayerStateEvent(includeQueue = includeQueue)
-
-        if (sinks.isEmpty()) return
-
-        scope.launch {
-            val delayMs = if (FoxyPlayerConnection.state.value.isBuffering) 80L else 150L
-            delay(delayMs)
-            if (sinks.isNotEmpty()) {
-                emitLivePlayerStateEvent(includeQueue = includeQueue)
-            }
-        }
     }
 
 
@@ -382,6 +406,7 @@ class FoxyFlutterBridge(
                         "playerBackgroundStyle" to settings.playerBackgroundStyle,
                         "playerStyle" to settings.playerStyle,
                         "playerButtonsStyle" to settings.playerButtonsStyle,
+                        "enableLiquidGlassLayout" to settings.enableLiquidGlassLayout,
                         "miniPlayerStyle" to settings.miniPlayerStyle,
                         "bottomNavigationStyle" to settings.bottomNavigationStyle,
                         "playerArtworkShape" to settings.playerArtworkShape,
@@ -399,6 +424,7 @@ class FoxyFlutterBridge(
                         "artworkPriority" to settings.artworkPriority,
                         "recognitionSource" to settings.recognitionSource,
                         "recognitionHistoryLimit" to settings.recognitionHistoryLimit,
+                        "experimentalHomeHeaderAccent" to settings.experimentalHomeHeaderAccent,
                         "homeBackgroundEnabled" to settings.homeBackgroundEnabled,
                         "defaultOpenTab" to settings.defaultOpenTab,
                         "quickPicksDisplayMode" to settings.quickPicksDisplayMode,
@@ -446,6 +472,38 @@ class FoxyFlutterBridge(
                     act.clearHomeBackground(result)
                 }
             }
+            FoxyFlutterChannels.Methods.GET_REMOTE_CONFIG_CACHE -> {
+                val prefs = context.applicationContext
+                    .getSharedPreferences("foxy_remote_config", Context.MODE_PRIVATE)
+                result.success(
+                    mapOf(
+                        "cachedJson" to prefs.getString("cached_json", "").orEmpty(),
+                        "overrideJson" to prefs.getString("override_json", "").orEmpty(),
+                        "fetchedAtMs" to prefs.getLong("fetched_at_ms", 0L),
+                    ),
+                )
+            }
+            FoxyFlutterChannels.Methods.SET_REMOTE_CONFIG_CACHE -> {
+                val cachedJson = call.argument<String>("cachedJson")
+                val overrideJson = call.argument<String>("overrideJson")
+                val fetchedAtMs = call.argument<Number>("fetchedAtMs")?.toLong()
+                val edit = context.applicationContext
+                    .getSharedPreferences("foxy_remote_config", Context.MODE_PRIVATE)
+                    .edit()
+                if (cachedJson != null) edit.putString("cached_json", cachedJson)
+                if (overrideJson != null) edit.putString("override_json", overrideJson)
+                if (fetchedAtMs != null) edit.putLong("fetched_at_ms", fetchedAtMs)
+                edit.apply()
+                result.success(mapOf("ok" to true))
+            }
+            FoxyFlutterChannels.Methods.CLEAR_REMOTE_CONFIG_CACHE -> {
+                context.applicationContext
+                    .getSharedPreferences("foxy_remote_config", Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .apply()
+                result.success(mapOf("ok" to true))
+            }
             FoxyFlutterChannels.Methods.RESTART_APP -> {
                 val act = context as? MainActivity
                 if (act == null) {
@@ -456,6 +514,8 @@ class FoxyFlutterBridge(
                 }
             }
             FoxyFlutterChannels.Methods.SET_APPEARANCE -> {
+                fun pickBool(incoming: Boolean?, current: Boolean): Boolean =
+                    incoming ?: current
                 val themePalette = call.argument<Number>("themePalette")?.toInt()
                 val themeMode = call.argument<Number>("themeMode")?.toInt()
                 val dynamicSongColors = call.argument<Boolean>("dynamicSongColors")
@@ -477,6 +537,7 @@ class FoxyFlutterBridge(
                 val playerBackgroundStyle = call.argument<Number>("playerBackgroundStyle")?.toInt()
                 val playerStyle = call.argument<Number>("playerStyle")?.toInt()
                 val playerButtonsStyle = call.argument<Number>("playerButtonsStyle")?.toInt()
+                val enableLiquidGlassLayout = call.argument<Boolean>("enableLiquidGlassLayout")
                 val miniPlayerStyle = call.argument<Number>("miniPlayerStyle")?.toInt()
                 val bottomNavigationStyle =
                     call.argument<Number>("bottomNavigationStyle")?.toInt()
@@ -495,6 +556,8 @@ class FoxyFlutterBridge(
                 val artworkPriority = call.argument<Number>("artworkPriority")?.toInt()
                 val recognitionSource = call.argument<Number>("recognitionSource")?.toInt()
                 val recognitionHistoryLimit = call.argument<Number>("recognitionHistoryLimit")?.toInt()
+                val experimentalHomeHeaderAccent =
+                    call.argument<Boolean>("experimentalHomeHeaderAccent")
                 val homeBackgroundEnabled = call.argument<Boolean>("homeBackgroundEnabled")
                 val defaultOpenTab = call.argument<Number>("defaultOpenTab")?.toInt()
                 val quickPicksDisplayMode = call.argument<Number>("quickPicksDisplayMode")?.toInt()
@@ -534,6 +597,7 @@ class FoxyFlutterBridge(
                         playerBackgroundStyle != null ||
                         playerStyle != null ||
                         playerButtonsStyle != null ||
+                        enableLiquidGlassLayout != null ||
                         miniPlayerStyle != null ||
                         bottomNavigationStyle != null ||
                         playerArtworkShape != null ||
@@ -542,6 +606,7 @@ class FoxyFlutterBridge(
                         thumbnailCornerRadius != null ||
                         lyricsAnimationStyle != null ||
                         artworkPriority != null ||
+                        experimentalHomeHeaderAccent != null ||
                         homeBackgroundEnabled != null ||
                         defaultOpenTab != null ||
                         quickPicksDisplayMode != null
@@ -549,20 +614,20 @@ class FoxyFlutterBridge(
                     current.copy(
                         themePalette = themePalette?.coerceIn(0, FoxyThemePresets.lastIndex) ?: current.themePalette,
                         themeMode = themeMode?.coerceIn(0, 2) ?: current.themeMode,
-                        dynamicSongColors = dynamicSongColors ?: current.dynamicSongColors,
+                        dynamicSongColors = pickBool(dynamicSongColors, current.dynamicSongColors),
                         accentArgb = accentArgb ?: current.accentArgb,
-                        blurEffects = blurEffects ?: current.blurEffects,
-                        compactPlayer = compactPlayer ?: current.compactPlayer,
-                        gestureControls = gestureControls ?: current.gestureControls,
+                        blurEffects = pickBool(blurEffects, current.blurEffects),
+                        compactPlayer = pickBool(compactPlayer, current.compactPlayer),
+                        gestureControls = pickBool(gestureControls, current.gestureControls),
                         iconScale = iconScale?.coerceIn(0, 2) ?: current.iconScale,
                         bottomNavScale = bottomNavScale?.coerceIn(0, 2) ?: current.bottomNavScale,
                         gridColumns = gridColumns?.coerceIn(2, 4) ?: current.gridColumns,
-                        showBottomLabels = showBottomLabels ?: current.showBottomLabels,
-                        disableAnimations = disableAnimations ?: current.disableAnimations,
-                        hapticFeedback = hapticFeedback ?: current.hapticFeedback,
-                        persistentQueue = persistentQueue ?: current.persistentQueue,
-                        saveHistory = saveHistory ?: current.saveHistory,
-                        sponsorBlockEnabled = sponsorBlockEnabled ?: current.sponsorBlockEnabled,
+                        showBottomLabels = pickBool(showBottomLabels, current.showBottomLabels),
+                        disableAnimations = pickBool(disableAnimations, current.disableAnimations),
+                        hapticFeedback = pickBool(hapticFeedback, current.hapticFeedback),
+                        persistentQueue = pickBool(persistentQueue, current.persistentQueue),
+                        saveHistory = pickBool(saveHistory, current.saveHistory),
+                        sponsorBlockEnabled = pickBool(sponsorBlockEnabled, current.sponsorBlockEnabled),
                         crossfadeMs = crossfadeMs?.let { v ->
                             when (v) {
                                 0, 3000, 5000, 8000, 12000 -> v
@@ -578,20 +643,24 @@ class FoxyFlutterBridge(
                             ?: current.playerStyle,
                         playerButtonsStyle = playerButtonsStyle?.coerceIn(0, 2)
                             ?: current.playerButtonsStyle,
+                        enableLiquidGlassLayout = pickBool(
+                            enableLiquidGlassLayout,
+                            current.enableLiquidGlassLayout,
+                        ),
                         miniPlayerStyle = miniPlayerStyle?.coerceIn(0, 2)
                             ?: current.miniPlayerStyle,
                         bottomNavigationStyle = bottomNavigationStyle?.coerceIn(0, 2)
                             ?: current.bottomNavigationStyle,
                         playerArtworkShape = playerArtworkShape?.coerceIn(0, 2)
                             ?: current.playerArtworkShape,
-                        hidePlayerArtwork = hidePlayerArtwork ?: current.hidePlayerArtwork,
-                        cropArtworkSquare = cropArtworkSquare ?: current.cropArtworkSquare,
+                        hidePlayerArtwork = pickBool(hidePlayerArtwork, current.hidePlayerArtwork),
+                        cropArtworkSquare = pickBool(cropArtworkSquare, current.cropArtworkSquare),
                         thumbnailCornerRadius = thumbnailCornerRadius?.coerceIn(0, 40)
                             ?: current.thumbnailCornerRadius,
                         lyricsAnimationStyle = lyricsAnimationStyle?.coerceIn(0, 5)
                             ?: current.lyricsAnimationStyle,
-                        lyricsPreferLrclib = lyricsPreferLrclib ?: current.lyricsPreferLrclib,
-                        lyricsRomanize = lyricsRomanize ?: current.lyricsRomanize,
+                        lyricsPreferLrclib = pickBool(lyricsPreferLrclib, current.lyricsPreferLrclib),
+                        lyricsRomanize = pickBool(lyricsRomanize, current.lyricsRomanize),
                         streamQualityTier = streamQualityTier?.coerceIn(0, 4) ?: current.streamQualityTier,
                         downloadQualityTier = downloadQualityTier?.coerceIn(0, 4)
                             ?: current.downloadQualityTier,
@@ -607,38 +676,58 @@ class FoxyFlutterBridge(
                             ?: current.recognitionSource,
                         recognitionHistoryLimit = recognitionHistoryLimit?.coerceIn(10, 100)
                             ?: current.recognitionHistoryLimit,
-                        homeBackgroundEnabled = homeBackgroundEnabled
-                            ?: current.homeBackgroundEnabled,
+                        experimentalHomeHeaderAccent = pickBool(
+                            experimentalHomeHeaderAccent,
+                            current.experimentalHomeHeaderAccent,
+                        ),
+                        homeBackgroundEnabled = pickBool(
+                            homeBackgroundEnabled,
+                            current.homeBackgroundEnabled,
+                        ),
                         defaultOpenTab = defaultOpenTab?.let { if (it == 1 || it == 3) it else 0 }
                             ?: current.defaultOpenTab,
                         quickPicksDisplayMode = quickPicksDisplayMode?.coerceIn(0, 1)
                             ?: current.quickPicksDisplayMode,
-                        showLikedInLibrary = showLikedInLibrary ?: current.showLikedInLibrary,
-                        showDownloadsInLibrary = showDownloadsInLibrary
-                            ?: current.showDownloadsInLibrary,
-                        showHistoryInLibrary = showHistoryInLibrary
-                            ?: current.showHistoryInLibrary,
-                        showMostPlayedInLibrary = showMostPlayedInLibrary
-                            ?: current.showMostPlayedInLibrary,
-                        showPlaylistsInLibrary = showPlaylistsInLibrary
-                            ?: current.showPlaylistsInLibrary,
-                        showLocalInLibrary = showLocalInLibrary ?: current.showLocalInLibrary,
-                        showRecognizedInLibrary = showRecognizedInLibrary
-                            ?: current.showRecognizedInLibrary,
+                        showLikedInLibrary = pickBool(showLikedInLibrary, current.showLikedInLibrary),
+                        showDownloadsInLibrary = pickBool(
+                            showDownloadsInLibrary,
+                            current.showDownloadsInLibrary,
+                        ),
+                        showHistoryInLibrary = pickBool(
+                            showHistoryInLibrary,
+                            current.showHistoryInLibrary,
+                        ),
+                        showMostPlayedInLibrary = pickBool(
+                            showMostPlayedInLibrary,
+                            current.showMostPlayedInLibrary,
+                        ),
+                        showPlaylistsInLibrary = pickBool(
+                            showPlaylistsInLibrary,
+                            current.showPlaylistsInLibrary,
+                        ),
+                        showLocalInLibrary = pickBool(showLocalInLibrary, current.showLocalInLibrary),
+                        showRecognizedInLibrary = pickBool(
+                            showRecognizedInLibrary,
+                            current.showRecognizedInLibrary,
+                        ),
                         contentLanguageTag = contentLanguageTag?.trim()?.takeIf { it.isNotEmpty() }
                             ?: current.contentLanguageTag,
                         appLanguageTag = appLanguageTag?.let { it.trim() } ?: current.appLanguageTag,
-                        proxyEnabled = proxyEnabled ?: current.proxyEnabled,
+                        proxyEnabled = pickBool(proxyEnabled, current.proxyEnabled),
                         proxyEndpoint = proxyEndpoint?.trim() ?: current.proxyEndpoint,
-                        normalizeVolume = normalizeVolume ?: current.normalizeVolume,
-                        skipSilence = skipSilence ?: current.skipSilence,
-                        autoSkipNextOnError = autoSkipNextOnError
-                            ?: current.autoSkipNextOnError,
-                        autoBackupEnabled = autoBackupEnabled ?: current.autoBackupEnabled,
-                        autoCheckUpdates = autoCheckUpdates ?: current.autoCheckUpdates,
-                        updateNotifications = updateNotifications ?: current.updateNotifications,
-                        continuePlaybackWhenDismissed = continuePlaybackWhenDismissed
-                            ?: current.continuePlaybackWhenDismissed,
+                        normalizeVolume = pickBool(normalizeVolume, current.normalizeVolume),
+                        skipSilence = pickBool(skipSilence, current.skipSilence),
+                        autoSkipNextOnError = pickBool(
+                            autoSkipNextOnError,
+                            current.autoSkipNextOnError,
+                        ),
+                        autoBackupEnabled = pickBool(autoBackupEnabled, current.autoBackupEnabled),
+                        autoCheckUpdates = pickBool(autoCheckUpdates, current.autoCheckUpdates),
+                        updateNotifications = pickBool(updateNotifications, current.updateNotifications),
+                        continuePlaybackWhenDismissed = pickBool(
+                            continuePlaybackWhenDismissed,
+                            current.continuePlaybackWhenDismissed,
+                        ),
                     )
                 }
                 result.success(null)
@@ -662,6 +751,7 @@ class FoxyFlutterBridge(
                         "name" to account.name,
                         "email" to account.email,
                         "avatarUrl" to account.avatarUrl,
+                        "pageId" to account.pageId,
                         "likedCount" to library.likedSongs.size,
                         "playlistCount" to localPlaylistCount,
                         "historyCount" to library.historySongs.size,
@@ -728,11 +818,6 @@ class FoxyFlutterBridge(
                             "songCount" to s.songCount,
                         )
                     }
-                    val explore = withContext(Dispatchers.IO) {
-                        runCatching {
-                            YTMusicApi.search("trending songs today").take(24)
-                        }.getOrElse { emptyList() }
-                    }
                     result.success(
                         mapOf(
                             "downloads" to library.downloadedSongs.map { it.toFlutterMap() },
@@ -743,7 +828,7 @@ class FoxyFlutterBridge(
                             "playlists" to playlistSongs.map { it.toFlutterMap() },
                             "mostPlayed" to library.mostPlayedFromHistory().map { it.toFlutterMap() },
                             "recentlyAdded" to library.recentlyMerged().map { it.toFlutterMap() },
-                            "explore" to explore.map { it.toFlutterMap() },
+                            "explore" to emptyList<Map<String, Any?>>(),
                             "recognitionHistory" to recognitionHistory.map { it.toMap() },
                             "recognitionCount" to recognitionHistory.size,
                             "playlistCount" to (localPlaylistMaps.size + ytPlaylistMaps.size),
@@ -806,7 +891,7 @@ class FoxyFlutterBridge(
             }
             FoxyFlutterChannels.Methods.SEARCH_ALL -> {
                 val query = call.argument<String>("query").orEmpty().trim()
-                val limit = (call.argument<Number>("limit")?.toInt() ?: 28).coerceIn(8, 40)
+                val limit = (call.argument<Number>("limit")?.toInt() ?: 18).coerceIn(8, 28)
                 if (query.isBlank()) {
                     result.success(
                         mapOf(
@@ -820,24 +905,44 @@ class FoxyFlutterBridge(
                     scope.launch {
                         val payload = runCatching {
                             withContext(Dispatchers.IO) {
-                                val categorized = YTMusicApi.searchAll(query, limit)
-                                val artistRows = YTMusicApi.searchArtistProfiles(query, limit)
-                                    .map { artist ->
-                                        Song(
-                                            videoId = artist.browseId.ifBlank { artist.name },
-                                            title = artist.name,
-                                            artist = artist.subscribers ?: "Artist",
-                                            thumbnail = artist.thumbnail,
-                                            artworkUrl = artist.thumbnail,
-                                        )
-                                    }
-                                    .filter { it.videoId.isNotBlank() && it.title.isNotBlank() }
-                                    .distinctBy { it.videoId }
-                                    .take(limit)
+                                val categorizedJob = async {
+                                    withTimeoutOrNull(5_200) {
+                                        YTMusicApi.searchAll(query, limit)
+                                    }.orEmpty()
+                                }
+                                val artistsJob = async {
+                                    withTimeoutOrNull(3_200) {
+                                        YTMusicApi.searchArtistProfiles(query, limit)
+                                    }.orEmpty()
+                                        .map { artist ->
+                                            Song(
+                                                videoId = artist.browseId.ifBlank { artist.name },
+                                                title = artist.name,
+                                                artist = artist.subscribers ?: "Artist",
+                                                thumbnail = artist.thumbnail,
+                                                artworkUrl = artist.thumbnail,
+                                            )
+                                        }
+                                        .filter { it.videoId.isNotBlank() && it.title.isNotBlank() }
+                                        .distinctBy { it.videoId }
+                                        .take(limit)
+                                }
+                                val soundCloudJob = async {
+                                    withTimeoutOrNull(3_200) {
+                                        StreamExtractor.searchSoundCloud(query, limit)
+                                    }.orEmpty()
+                                        .filter { it.videoId.isNotBlank() && it.title.isNotBlank() }
+                                        .distinctBy { it.videoId }
+                                        .take(limit)
+                                }
+                                val categorized = categorizedJob.await()
+                                val artistRows = artistsJob.await()
+                                val youtubeSongs = categorized["songs"].orEmpty()
+                                    .filter { it.videoId.isNotBlank() }
+                                val soundCloudSongs = soundCloudJob.await()
+                                val mixedSongs = interleaveSongs(youtubeSongs, soundCloudSongs, limit)
                                 mapOf(
-                                    "songs" to categorized["songs"].orEmpty()
-                                        .filter { it.videoId.isNotBlank() }
-                                        .map { it.toFlutterMap() },
+                                    "songs" to mixedSongs.map { it.toFlutterMap() },
                                     "videos" to categorized["videos"].orEmpty()
                                         .filter { it.videoId.isNotBlank() }
                                         .map { it.toFlutterMap() },
@@ -881,6 +986,7 @@ class FoxyFlutterBridge(
             FoxyFlutterChannels.Methods.HOME_FEED -> {
                 val params = call.argument<String>("params")?.trim()?.takeIf { it.isNotBlank() }
                 val mood = call.argument<String>("mood")?.trim()?.takeIf { it.isNotBlank() }
+                val fast = call.argument<Boolean>("fast") == true
                 scope.launch {
                     val payload = runCatching {
                         withContext(Dispatchers.IO) {
@@ -910,13 +1016,67 @@ class FoxyFlutterBridge(
                                     }
                                 }
                             }
-                            suspend fun searchSection(title: String, query: String, limit: Int = 18) =
+                            val searchTimeoutMs = if (fast) 1_400L else 2_400L
+                            val defaultSearchLimit = if (fast) 10 else 18
+                            suspend fun searchSection(
+                                title: String,
+                                query: String,
+                                limit: Int = defaultSearchLimit,
+                            ) =
                                 RecommendationSection(
                                     title,
-                                    withTimeoutOrNull(2_400) {
+                                    withTimeoutOrNull(searchTimeoutMs) {
                                         YTMusicApi.search(query)
                                     }.orEmpty().take(limit),
                                 )
+                            suspend fun freshReleaseSongs(limit: Int = defaultSearchLimit): List<Song> {
+                                val year = Calendar.getInstance().get(Calendar.YEAR)
+                                val queries = listOf(
+                                    "new songs $year official audio",
+                                    "latest music releases $year songs",
+                                    "new bollywood songs $year",
+                                    "new hindi songs $year",
+                                    "new punjabi songs $year",
+                                    "new pop songs $year",
+                                    "new indie songs $year",
+                                )
+                                val staleTerms = listOf(
+                                    "90s",
+                                    "80s",
+                                    "70s",
+                                    "2000s",
+                                    "old songs",
+                                    "old is gold",
+                                    "evergreen",
+                                    "classic",
+                                    "classics",
+                                    "throwback",
+                                    "retro",
+                                    "recreated old",
+                                    "jukebox old",
+                                )
+                                fun Song.looksStale(): Boolean {
+                                    val text = listOf(title, artist, album.orEmpty())
+                                        .joinToString(" ")
+                                        .lowercase(Locale.US)
+                                    return staleTerms.any { text.contains(it) }
+                                }
+                                return queries
+                                    .map { query ->
+                                        async {
+                                            withTimeoutOrNull(if (fast) 1_600L else 2_600L) {
+                                                YTMusicApi.search(query).take(limit)
+                                            }.orEmpty()
+                                        }
+                                    }
+                                    .awaitAll()
+                                    .flatten()
+                                    .asSequence()
+                                    .filter { it.videoId.isNotBlank() && !it.looksStale() }
+                                    .distinctBy { it.videoId }
+                                    .take(limit)
+                                    .toList()
+                            }
                             suspend fun categorySections(seed: String): List<RecommendationSection> {
                                 val normalized = seed.lowercase(Locale.US)
                                 val pairs = when (normalized) {
@@ -942,7 +1102,7 @@ class FoxyFlutterBridge(
                                         "Global top songs" to "global top songs today",
                                         "Viral hits" to "viral songs trending now",
                                         "YouTube charts" to "youtube music charts songs",
-                                        "New releases" to "new release songs this week",
+                                        "New releases" to "latest new songs ${Calendar.getInstance().get(Calendar.YEAR)} official audio",
                                     )
                                     "radio" -> listOf(
                                         "Foxy Radio" to "top songs radio mix",
@@ -952,20 +1112,29 @@ class FoxyFlutterBridge(
                                         "Throwback Radio" to "throwback radio hits",
                                     )
                                     "categories" -> listOf(
-                                        "Phonk" to "phonk songs",
+                                        "Phonk" to "phonk drift songs",
                                         "Classic hits" to "classic hits songs",
-                                        "Old is gold" to "old hindi songs classics",
-                                        "Acoustic" to "acoustic songs unplugged",
-                                        "Lo-fi" to "lofi songs chill",
-                                        "Devotional" to "devotional songs bhajan",
-                                        "Romantic hits" to "romantic hits songs",
+                                        "Old is gold" to "old hindi evergreen songs",
+                                        "Lo-fi" to "lofi chill beats songs",
+                                        "Acoustic" to "acoustic unplugged songs",
+                                        "Romantic hits" to "romantic love hits songs",
+                                        "Sad songs" to "sad songs heartbreak hits",
+                                        "Devotional" to "devotional bhajan songs",
+                                        "Road trip" to "road trip travel songs",
+                                        "Gym heat" to "workout gym hype songs",
+                                        "Night drive" to "night drive synth songs",
                                     )
                                     else -> listOf(
                                         seed.replaceFirstChar { it.titlecase(Locale.US) } to "$seed songs mix",
                                         "More ${seed.lowercase(Locale.US)}" to "$seed playlist songs",
                                     )
                                 }
-                                return pairs.map { (title, query) -> searchSection(title, query) }
+                                return pairs
+                                    .let { if (fast) it.take(3) else it }
+                                    .map { (title, query) ->
+                                        async { searchSection(title, query) }
+                                    }
+                                    .awaitAll()
                             }
                             suspend fun featuredArtistSongs(): List<Song> {
                                 val names = listOf(
@@ -1066,7 +1235,7 @@ class FoxyFlutterBridge(
                             } else {
                                 null
                             }
-                            val foxyDiscoveryJobs = if (params == null && mood == null) {
+                            val foxyDiscoveryJobs = if (!fast && params == null && mood == null) {
                                 listOf(
                                     async {
                                         recentSeed?.let { seed ->
@@ -1155,20 +1324,18 @@ class FoxyFlutterBridge(
                             val discoveryJobs = listOf(
                                 async {
                                     runCatching {
-                                        withTimeoutOrNull(3_200) {
+                                        withTimeoutOrNull(if (fast) 1_800L else 3_200L) {
                                             YTMusicApi.homeRecommendations(params)
                                         }.orEmpty()
                                     }
                                         .getOrElse { emptyList() }
                                 },
                                 async {
-                                    if (params == null && mood == null) {
+                                    if (!fast && params == null && mood == null) {
                                         listOf(
                                             RecommendationSection(
                                                 "New releases",
-                                                withTimeoutOrNull(2_200) {
-                                                    YTMusicApi.search("new release songs this week")
-                                                }.orEmpty().take(18),
+                                                freshReleaseSongs(18),
                                             ),
                                         )
                                     } else {
@@ -1176,7 +1343,7 @@ class FoxyFlutterBridge(
                                     }
                                 },
                                 async {
-                                    if (params == null && mood == null) {
+                                    if (!fast && params == null && mood == null) {
                                         val chartEarly =
                                             runCatching { YTMusicApi.chartsSections() }
                                                 .getOrElse { emptyList() }
@@ -1196,12 +1363,26 @@ class FoxyFlutterBridge(
                                 },
                             ) + foxyDiscoveryJobs
                             discoveryJobs.awaitAll().forEach(::addAll)
+                            if (fast && params == null && mood == null && byTitle.size < 3) {
+                                addAll(
+                                    listOf(
+                                        RecommendationSection(
+                                            "Trending now",
+                                            withTimeoutOrNull(1_400) {
+                                                YTMusicApi.search("trending songs today")
+                                            }.orEmpty().take(10),
+                                        ),
+                                    ),
+                                )
+                            }
                             if (byTitle.isEmpty()) {
                                 addAll(
                                     listOf(
                                         RecommendationSection(
                                             "Quick picks",
-                                            YTMusicApi.search("top songs today").take(16),
+                                            withTimeoutOrNull(if (fast) 1_400L else 2_400L) {
+                                                YTMusicApi.search("top songs today")
+                                            }.orEmpty().take(if (fast) 10 else 16),
                                         ),
                                     ).filter { it.songs.isNotEmpty() },
                                 )
@@ -1226,7 +1407,7 @@ class FoxyFlutterBridge(
                                     else -> "square"
                                 }
                             }
-                            val sections = byTitle.values.take(24).map { sec ->
+                            val sections = byTitle.values.take(if (fast) 6 else 24).map { sec ->
                                 mapOf(
                                     "title" to sec.title,
                                     "layout" to layoutFor(sec.title),
@@ -1298,12 +1479,12 @@ class FoxyFlutterBridge(
                 val loopAll = FoxyPlayerConnection.state.value.repeatMode == RepeatMode.All
                 FoxyPlayerConnection.playNext(loop = loopAll)
                 result.success(null)
-                scheduleFlutterPlayerStatePush(includeQueue = true)
+                scheduleFlutterPlayerStatePush(includeQueue = false)
             }
             FoxyFlutterChannels.Methods.PREVIOUS -> {
                 FoxyPlayerConnection.playPrevious()
                 result.success(null)
-                scheduleFlutterPlayerStatePush(includeQueue = true)
+                scheduleFlutterPlayerStatePush(includeQueue = false)
             }
             FoxyFlutterChannels.Methods.PAUSE -> {
                 FoxyPlayerConnection.pause()
@@ -1333,11 +1514,11 @@ class FoxyFlutterBridge(
                         delay(40)
                         emitLivePlayerStateEvent(includeQueue = true)
                         delay(120)
-                        emitLivePlayerStateEvent(includeQueue = true)
+                        emitLivePlayerStateEvent(includeQueue = false)
                         delay(250)
-                        emitLivePlayerStateEvent(includeQueue = true)
+                        emitLivePlayerStateEvent(includeQueue = false)
                         delay(500)
-                        emitLivePlayerStateEvent(includeQueue = true)
+                        emitLivePlayerStateEvent(includeQueue = false)
                     }
                     scheduleFlutterPlayerStatePush(includeQueue = true)
                 }
@@ -1347,7 +1528,7 @@ class FoxyFlutterBridge(
                 val index = (call.argument<Number>("index")?.toInt() ?: 0).coerceAtLeast(0)
                 FoxyPlayerConnection.skipToQueueIndex(context, index)
                 result.success(null)
-                scheduleFlutterPlayerStatePush(includeQueue = true)
+                scheduleFlutterPlayerStatePush(includeQueue = false)
             }
             FoxyFlutterChannels.Methods.REMOVE_FROM_QUEUE -> {
                 call.argument<Map<String, Any?>>("song")?.toSongOrNull()?.let { FoxyPlayerConnection.removeFromQueue(it) }
@@ -1751,6 +1932,35 @@ class FoxyFlutterBridge(
                     }
                 }
             }
+            FoxyFlutterChannels.Methods.ACCOUNT_SET_COOKIE -> {
+                val cookie = call.argument<String>("cookie").orEmpty().trim()
+                if (cookie.isBlank() || !cookie.parseCookies().containsKey("SAPISID")) {
+                    result.error("bad_cookie", "Paste a valid YouTube Music cookie containing SAPISID.", null)
+                } else {
+                    scope.launch {
+                        val profile = withContext(Dispatchers.IO) {
+                            YTMusicAuthApi.fetchAccountProfiles(cookie).firstOrNull()
+                        }
+                        FoxyAccount.updateSession(
+                            cookie = cookie,
+                            name = profile?.name.orEmpty(),
+                            email = profile?.email.orEmpty(),
+                            avatarUrl = profile?.avatarUrl.orEmpty(),
+                            pageId = profile?.pageId.orEmpty(),
+                        )
+                        emitAccountSessionUpdated()
+                        result.success(
+                            mapOf(
+                                "ok" to true,
+                                "name" to FoxyAccount.state.value.name,
+                                "email" to FoxyAccount.state.value.email,
+                                "avatarUrl" to FoxyAccount.state.value.avatarUrl,
+                                "pageId" to FoxyAccount.state.value.pageId,
+                            ),
+                        )
+                    }
+                }
+            }
             FoxyFlutterChannels.Methods.ACCOUNT_SIGN_OUT -> {
                 FoxyAccount.signOut()
                 emitAccountSessionUpdated()
@@ -1811,7 +2021,6 @@ class FoxyFlutterBridge(
 
         // Immediate strong update
         emitLivePlayerStateEvent(includeQueue = true)
-        scheduleFlutterPlayerStatePush(includeQueue = true)
         startBroadcastIfNeeded()
     }
 
@@ -1845,18 +2054,48 @@ class FoxyFlutterBridge(
                         append('|')
                         append(ui.error.orEmpty())
                         append('|')
-                        append(livePosition / 500L)
+                        append(ui.durationMs / 1000L)
+                        append('|')
+                        append(ui.streamBitrate ?: 0)
+                        append('|')
+                        append(ui.streamCodec.orEmpty())
+                        append('|')
+                        append(ui.streamSource.orEmpty())
                     }
                     if (fullKey != lastFullEmitKey) {
                         lastFullEmitKey = fullKey
                         lastLightEmitAtMs = 0L
-                        emitLivePlayerStateEvent(ui, includeQueue = true)
+                        val queueKey = buildString {
+                            append(ui.queue.size)
+                            append('|')
+                            append(ui.queue.joinToString("|") { it.videoId })
+                        }
+                        val includeQueue = queueKey != lastQueueEmitKey
+                        if (includeQueue) lastQueueEmitKey = queueKey
+                        emitLivePlayerStateEvent(ui, includeQueue = includeQueue)
                         return@collect
                     }
                     val now = System.currentTimeMillis()
-                    if (now - lastLightEmitAtMs < 180L) return@collect
-                    lastLightEmitAtMs = now
-                    emitLivePlayerStateEvent(ui, includeQueue = false)
+                    val progressKey = buildString {
+                        append(ui.currentSong?.videoId.orEmpty())
+                        append('|')
+                        append(livePosition / 500L)
+                        append('|')
+                        append(ui.durationMs / 1000L)
+                        append('|')
+                        append(effectivePlaying)
+                        append('|')
+                        append(ui.isBuffering && !effectivePlaying)
+                    }
+                    if (progressKey != lastProgressKey && now - lastProgressEmitAtMs >= 450L) {
+                        lastProgressKey = progressKey
+                        lastProgressEmitAtMs = now
+                        emitPlayerProgressEvent(ui)
+                    }
+                    if ((ui.isBuffering || !effectivePlaying) && now - lastLightEmitAtMs >= 900L) {
+                        lastLightEmitAtMs = now
+                        emitLivePlayerStateEvent(ui, includeQueue = false)
+                    }
                 }
             }
             launch {
@@ -2106,19 +2345,44 @@ private fun Song.toFlutterMap(ctx: Context? = FoxyFlutterBridge.applicationConte
     val offlineArt = ctx?.let { FoxyOfflineBundle.offlineArtworkPath(it, videoId) }
         ?.takeIf { p -> File(p).isFile && File(p).length() > 0L }
     val hqArt = highQualityArtworkUrl()
-    val networkThumb = hqArt.ifBlank { thumbnail }.ifBlank { artworkUrl.orEmpty() }
+    val networkThumb = thumbnail.ifBlank { hqArt }.ifBlank { artworkUrl.orEmpty() }
+    val networkArtwork = hqArt.ifBlank { artworkUrl.orEmpty() }.ifBlank { thumbnail }
+    val source = when {
+        videoId.startsWith("https://soundcloud.com/", ignoreCase = true) ||
+            videoId.startsWith("http://soundcloud.com/", ignoreCase = true) -> "soundcloud"
+        localPath?.isNotBlank() == true -> "local"
+        else -> "youtube"
+    }
     return mapOf(
         "videoId" to videoId,
         "title" to title,
         "artist" to artist,
         "thumbnail" to (offlineArt ?: networkThumb),
-        "artworkUrl" to (offlineArt ?: networkThumb),
+        "artworkUrl" to (offlineArt ?: networkArtwork),
         "duration" to duration,
         "album" to album,
         "localPath" to localPath,
         "isDownloaded" to isDownloaded,
         "offlineArtworkPath" to offlineArt,
+        "source" to source,
     )
+}
+
+private fun interleaveSongs(primary: List<Song>, secondary: List<Song>, limit: Int): List<Song> {
+    val out = ArrayList<Song>(limit)
+    val seen = HashSet<String>()
+    val max = maxOf(primary.size, secondary.size)
+    for (i in 0 until max) {
+        if (i < primary.size && seen.add(primary[i].videoId)) {
+            out += primary[i]
+            if (out.size >= limit) break
+        }
+        if (i < secondary.size && seen.add(secondary[i].videoId)) {
+            out += secondary[i]
+            if (out.size >= limit) break
+        }
+    }
+    return out
 }
 
 /**
@@ -2296,7 +2560,7 @@ private suspend fun resolveArtistProfilePayload(
         .sortedByDescending { artistSongScore(it, cleanArtist) }
         .take(12)
 
-    val artwork = bestProfile?.thumbnail?.trim().orEmpty()
+    val artwork = upgradeProfileArtwork(bestProfile?.thumbnail?.trim().orEmpty())
 
     return mapOf(
         "artist" to (bestProfile?.name?.takeIf { it.isNotBlank() } ?: cleanArtist),
@@ -2305,6 +2569,19 @@ private suspend fun resolveArtistProfilePayload(
         "songs" to songs.map { it.toFlutterMap() },
         "albums" to albums.map { it.toFlutterMap() },
     )
+}
+
+private fun upgradeProfileArtwork(url: String): String {
+    if (url.isBlank()) return url
+    return url
+        .replace("=s88-", "=s1200-")
+        .replace("=s120-", "=s1200-")
+        .replace("=s176-", "=s1200-")
+        .replace("=s360-", "=s1200-")
+        .replace("=w88-h88", "=w1200-h1200")
+        .replace("=w120-h120", "=w1200-h1200")
+        .replace("=w176-h176", "=w1200-h1200")
+        .replace("=w360-h360", "=w1200-h1200")
 }
 
 private fun artistProfileScore(profile: ArtistProfileResult, artist: String): Int {
