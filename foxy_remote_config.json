@@ -3,8 +3,19 @@
   "enabled": true,
   "home": {
     "signedInHeroMode": "quickPicks",
-    "sectionOrder": ["quickPicks", "newReleases", "artists", "categories"],
+    "sectionOrder": [
+      "quickPicks",
+      "newReleases",
+      "listenAgain",
+      "foxyCharts",
+      "artists",
+      "playlists",
+      "categories"
+    ],
     "maxGridItems": 6,
+    "chartLayout": "banner16x9",
+    "quickPickScale": 1.0,
+    "quickPickTrailingIcon": false,
     "cardScale": 1.0,
     "gradientStrength": 0.95
   },
